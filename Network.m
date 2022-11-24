@@ -421,7 +421,7 @@ classdef Network < handle & Fluids
             
         end    
         % Single phase Reactive transport_Raoof_2017 
-        function calculateReactiveTransport_SinglePhaseDiffusion(obj, inletPressure, outletPressure, soluteConcentration, poreVolumeInjected) 
+        function calculateReactiveTransport_SinglePhaseDiffusion_simple(obj, inletPressure, outletPressure, soluteConcentration, simulationVolume, poreVolumeInjected) 
             
             % calculate pressure distribution
             pressureDistribution_Cylindrical (obj, inletPressure, outletPressure); 
@@ -429,7 +429,7 @@ classdef Network < handle & Fluids
             residenceTime_link = zeros(obj.numberOfLinks,1);
             flowRate_link = zeros(obj.numberOfLinks,1);
             obj.totalFlowRate = 0;            
-            effectiveDiffusion = 10^ (-9);         
+            effectiveDiffusion = 10^ (-5);         
             diffusion_link = zeros(obj.numberOfLinks,1);
             
             % calculate flowrate of links residence time                          
@@ -473,12 +473,14 @@ classdef Network < handle & Fluids
              
             t = 0; 
             time = 0;
-            simulationTime = obj.poreVolume / obj.totalFlowRate/15;
+            simulationTime = simulationVolume / obj.totalFlowRate;
             injectionTime = poreVolumeInjected / obj.totalFlowRate;
+            
             timePlot = zeros(round(simulationTime/timeStep)+1 ,1);
             flux_averagedConcentration = zeros(round(simulationTime/timeStep)+1 ,1);
             obj.BreakThroughCurve_singlePhase = zeros(round(simulationTime/timeStep)+1 ,2);
             soluteConcentration1 = soluteConcentration;
+            
             % Plot & Animation
             h = animatedline;
             h.Color = 'b';
@@ -493,113 +495,113 @@ classdef Network < handle & Fluids
              
             while time < simulationTime
                 
-                if time > injectionTime*0.6
+                if time > injectionTime
                     soluteConcentration = 0;
                 end
                 
                 t = t+1;
-                time = time + timeStep; 
+                time = time + timeStep;
                 timePlot(t) = time;
                 sumOfConcentration = 0;
                 sumOfFlowRate = 0;
-            % calculate concentration of nodes & links based on eq. 8 & 9
-            for i = 1:obj.numberOfNodes  
-                    
-                for j = 1:obj.Nodes{i}.connectionNumber 
-                    
-                    connectedLinkIndex = obj.Nodes{i}.connectedLinks(j);                    
-                    connectedNodeIndex = obj.Nodes{i}.connectedNodes(j);                 
-                    
-                    diffusion_node(i) = diffusion_node(i) + diffusion_link(connectedLinkIndex);  
-                    Known(i,1) = Known(i,1) + obj.Links{i}.concentration(t)*...
+                
+                % calculate concentration of nodes & links based on eq. 8 & 9
+                for i = 1:obj.numberOfNodes  
+                        for j = 1:obj.Nodes{i}.connectionNumber
+                            
+                            connectedLinkIndex = obj.Nodes{i}.connectedLinks(j);
+                            connectedNodeIndex = obj.Nodes{i}.connectedNodes(j);
+                            
+                            diffusion_node(i) = diffusion_node(i) + diffusion_link(connectedLinkIndex);
+                            Known(i,1) = Known(i,1) + obj.Links{i}.concentration(t)*...
                                 timeStep / obj.Nodes{i}.volume *  diffusion_link(connectedLinkIndex);
                             
-                    % determine link flowing into this node
-                    if connectedNodeIndex ~= 0 && connectedNodeIndex ~= -1                        
-                        
-                        if obj.Nodes{connectedNodeIndex}.waterPressure > obj.Nodes{i}.waterPressure                             
-                            flowRate_node(i) = flowRate_node(i) + flowRate_link(connectedLinkIndex);  
-                            Known(i,1) = Known(i,1) + obj.Links{i}.concentration(t)*...
-                                timeStep / obj.Nodes{i}.volume *  flowRate_link(connectedLinkIndex);
+                            % determine link flowing into this node
+                            if connectedNodeIndex ~= 0 && connectedNodeIndex ~= -1
+                                
+                                if obj.Nodes{connectedNodeIndex}.waterPressure > obj.Nodes{i}.waterPressure
+                                    flowRate_node(i) = flowRate_node(i) + flowRate_link(connectedLinkIndex);
+                                    Known(i,1) = Known(i,1) + obj.Links{i}.concentration(t)*...
+                                        timeStep / obj.Nodes{i}.volume *  flowRate_link(connectedLinkIndex);
+                                end
+                                
+                            elseif connectedNodeIndex == -1
+                                flowRate_node(i) = flowRate_node(i) + flowRate_link(connectedLinkIndex);
+                                Known(i,1) = Known(i,1) + obj.Links{i}.concentration(t)*...
+                                    timeStep / obj.Nodes{i}.volume *  flowRate_link(connectedLinkIndex);
+                            end
                         end
-                            
-                    elseif connectedNodeIndex == -1                                                
-                            flowRate_node(i) = flowRate_node(i) + flowRate_link(connectedLinkIndex);
-                            Known(i,1) = Known(i,1) + obj.Links{i}.concentration(t)*...
-                                timeStep / obj.Nodes{i}.volume *  flowRate_link(connectedLinkIndex);
+                        
+                        Factor(i, i) = 1 + timeStep * (flowRate_node(i)+  diffusion_node(i)) / obj.Nodes{i}.volume  ;
+                        Known(i,1) = Known(i,1) + obj.Nodes{i}.concentration(t); 
+                end
+                
+                nodesConcentration_new = gmres (Factor, Known,[], 1e-10, obj.numberOfNodes);
+                
+                % asign new concentration of nodes
+                for i = 1:obj.numberOfNodes
+                    if nodesConcentration_new(i) > soluteConcentration1
+                        obj.Nodes{i}.concentration(t+1) = soluteConcentration1;
+                    else
+                        obj.Nodes{i}.concentration(t+1) = nodesConcentration_new(i);
                     end
                 end
                 
-                Factor(i, i) = 1 + timeStep * (flowRate_node(i)+  diffusion_node(i)) / obj.Nodes{i}.volume  ;
-                Known(i,1) = Known(i,1) + obj.Nodes{i}.concentration(t);
-            end
-            
-            nodesConcentration_new = gmres (Factor, Known,[], 1e-10, obj.numberOfNodes);
-                        
-            % asign new concentration of nodes
-            for i = 1:obj.numberOfNodes
-                if nodesConcentration_new(i) > soluteConcentration
-                obj.Nodes{i}.concentration(t+1) = soluteConcentration;
-                else
-                obj.Nodes{i}.concentration(t+1) = nodesConcentration_new(i);
-                end
-            end
-            
-            % calculate new concentration of links
-            for i = 1:obj.numberOfLinks 
-                
-                node1Index = obj.Links{i}.pore1Index;
-                node2Index = obj.Links{i}.pore2Index;
-                
-                if ~obj.Links{i}.isInlet && ~obj.Links{i}.isOutlet
-                    if obj.Nodes{node1Index}.waterPressure > obj.Nodes{node2Index}.waterPressure
-                    obj.Links{i}.concentration(t+1) = (obj.Links{i}.concentration(t)+...
-                         timeStep  / obj.Links{i}.volume * (flowRate_link(i)+ ...
-                         diffusion_link(i))*obj.Nodes{node1Index}.concentration(t+1)+...
-                         timeStep  / obj.Links{i}.volume *diffusion_link(i) * obj.Nodes{node2Index}.concentration(t+1))/...
-                         (1 + timeStep / obj.Links{i}.volume * (flowRate_link(i)+diffusion_link(i)));
-                    else 
+                % calculate new concentration of links
+                for i = 1:obj.numberOfLinks
+                    
+                    node1Index = obj.Links{i}.pore1Index;
+                    node2Index = obj.Links{i}.pore2Index;
+                    
+                    if ~obj.Links{i}.isInlet && ~obj.Links{i}.isOutlet
+                        if obj.Nodes{node1Index}.waterPressure > obj.Nodes{node2Index}.waterPressure
+                            obj.Links{i}.concentration(t+1) = (obj.Links{i}.concentration(t)+...
+                                timeStep  / obj.Links{i}.volume * (flowRate_link(i)+ ...
+                                diffusion_link(i))*obj.Nodes{node1Index}.concentration(t+1)+...
+                                timeStep  / obj.Links{i}.volume *diffusion_link(i) * obj.Nodes{node2Index}.concentration(t+1))/...
+                                (1 + timeStep / obj.Links{i}.volume * (flowRate_link(i)+diffusion_link(i)));
+                        elseif obj.Nodes{node2Index}.waterPressure > obj.Nodes{node1Index}.waterPressure
+                            obj.Links{i}.concentration(t+1) = (obj.Links{i}.concentration(t)+...
+                                timeStep  / obj.Links{i}.volume * (flowRate_link(i)+ ...
+                                diffusion_link(i))*obj.Nodes{node2Index}.concentration(t+1)+...
+                                timeStep  / obj.Links{i}.volume *diffusion_link(i) * obj.Nodes{node1Index}.concentration(t+1))/...
+                                (1 + timeStep / obj.Links{i}.volume * (flowRate_link(i)+diffusion_link(i)));
+                        end
+                    elseif obj.Links{i}.isInlet
                         obj.Links{i}.concentration(t+1) = (obj.Links{i}.concentration(t)+...
-                         timeStep  / obj.Links{i}.volume * (flowRate_link(i)+ ...
-                         diffusion_link(i))*obj.Nodes{node2Index}.concentration(t+1)+...
-                         timeStep  / obj.Links{i}.volume *diffusion_link(i) * obj.Nodes{node1Index}.concentration(t+1))/...
-                         (1 + timeStep / obj.Links{i}.volume * (flowRate_link(i)+diffusion_link(i)));
-                    end 
-                elseif obj.Links{i}.isInlet
-                    obj.Links{i}.concentration(t+1) = (obj.Links{i}.concentration(t)+...
-                         timeStep  / obj.Links{i}.volume * (flowRate_link(i)+ ...
-                         diffusion_link(i))* soluteConcentration +...
-                         timeStep  / obj.Links{i}.volume *diffusion_link(i) * obj.Nodes{node2Index}.concentration(t+1))/...
-                         (1 + timeStep / obj.Links{i}.volume * (flowRate_link(i)+diffusion_link(i)));
-                elseif obj.Links{i}.isOutlet 
-                     obj.Links{i}.concentration(t+1) = (obj.Links{i}.concentration(t)+...
-                         timeStep  / obj.Links{i}.volume * (flowRate_link(i)+ ...
-                         diffusion_link(i))*obj.Nodes{node1Index}.concentration(t+1))/...
-                         (1 + timeStep / obj.Links{i}.volume * (flowRate_link(i)+diffusion_link(i))); 
-                    sumOfConcentration = sumOfConcentration + ...
-                        obj.Links{i}.concentration(t)*flowRate_link(i);
-                    sumOfFlowRate = sumOfFlowRate + flowRate_link(i);
-                end 
+                            timeStep  / obj.Links{i}.volume * (flowRate_link(i)+ ...
+                            diffusion_link(i))* soluteConcentration +...
+                            timeStep  / obj.Links{i}.volume *diffusion_link(i) * obj.Nodes{node2Index}.concentration(t+1))/...
+                            (1 + timeStep / obj.Links{i}.volume * (flowRate_link(i)+diffusion_link(i)));
+                    elseif obj.Links{i}.isOutlet
+                        obj.Links{i}.concentration(t+1) = (obj.Links{i}.concentration(t)+...
+                            timeStep  / obj.Links{i}.volume * (flowRate_link(i)+ ...
+                            diffusion_link(i))*obj.Nodes{node1Index}.concentration(t+1))/...
+                            (1 + timeStep / obj.Links{i}.volume * (flowRate_link(i)+diffusion_link(i)));
+                        sumOfConcentration = sumOfConcentration + ...
+                            obj.Links{i}.concentration(t)*flowRate_link(i);
+                        sumOfFlowRate = sumOfFlowRate + flowRate_link(i);
+                    end
+                end
+                % calculate BreakThroughCurve at outlet of network
+                flux_averagedConcentration(t) = sumOfConcentration / sumOfFlowRate / soluteConcentration1;
+                
+                fileName = obj.vtkWriter_glyph('Diff',t);
+                % Plot & Animation
+                addpoints(h,timePlot(t),flux_averagedConcentration(t));
+                % GIF
+                plot(timePlot(1:t),flux_averagedConcentration(1:t), 'b','LineWidth',2);
+                axis([0 simulationTime 0 1])
+                title('Break Through Curve')
+                xlabel('Time(s)')
+                ylabel('DimensionlessConcentration(-)')
+                drawnow
+                frame = getframe(fig);
+                im{t} = frame2im(frame);
             end
-            % calculate BreakThroughCurve at outlet of network 
-            flux_averagedConcentration(t) = sumOfConcentration / sumOfFlowRate / soluteConcentration1;
-%             nameFile = vtkWriter(obj,'Diff',t);
-             fileName = obj.vtkWriter_glyph('Diff',t);
-%             movefile nameFile D:\Uni\PUT\Dissertation\PNM_Code\MatlabPNM\Ver.2\seq\Diff
-            % Plot & Animation
-            addpoints(h,timePlot(t),flux_averagedConcentration(t));  
-            % GIF 
-%             plot(timePlot(1:t),flux_averagedConcentration(1:t), 'b','LineWidth',2);            
-%             axis([0 simulationTime 0 1])
-%             title('Break Through Curve')
-%             xlabel('Time(s)')            
-%             ylabel('DimensionlessConcentration(-)') 
-            drawnow 
-            frame = getframe(fig);
-            im{t} = frame2im(frame);
-            end
+            
             close;
-            figure;                                 
+            figure;
             axis([0 simulationTime 0 1])
             for idx = 1:length(timePlot)
                 subplot(15,15,idx)
@@ -615,18 +617,371 @@ classdef Network < handle & Fluids
                 end
             end
             obj.BreakThroughCurve_singlePhase(:,1) = timePlot;
-            obj.BreakThroughCurve_singlePhase(:,2) = flux_averagedConcentration; 
+            obj.BreakThroughCurve_singlePhase(:,2) = flux_averagedConcentration;
             
-            % Plot & Animation 
-%             for k = 1:length(timePlot) 
+            % Plot & Animation
+%             for k = 1:length(timePlot)
 %                 addpoints(h,timePlot(k),flux_averagedConcentration(k));
 %                 drawnow
-%                 pause(0.05); 
+%                 pause(0.05);
 %             end
 %             plot(timePlot,flux_averagedConcentration,'*');
         end 
-        % Single phase Reactive transport_Raoof_2010  
-        function calculateReactiveTransport_SinglePhaseDesorption(obj, inletPressure, outletPressure, soluteConcentration, poreVolumeInjected)
+         
+        function calculateReactiveTransport_SinglePhaseDiffusion_raoof(obj, inletPressure, outletPressure, soluteConcentration, simulationVolume, poreVolumeInjected) 
+            
+            % calculate pressure distribution
+            pressureDistribution_Cylindrical (obj, inletPressure, outletPressure); 
+            
+            residenceTime_link = zeros(obj.numberOfLinks,1);
+            flowRate_link = zeros(obj.numberOfLinks,1);
+            obj.totalFlowRate = 0;            
+            effectiveDiffusion = 10^ (-9);         
+            diffusion_link = zeros(obj.numberOfLinks,1);
+            
+            % calculate flowrate of links residence time                          
+            for ii = 1:obj.numberOfLinks                
+                
+                node1Index = obj.Links{ii}.pore1Index;
+                node2Index = obj.Links{ii}.pore2Index;
+                
+                if ~obj.Links{ii}.isInlet && ~obj.Links{ii}.isOutlet      
+                    
+                    % calculate the flow rate of the fluid
+                    flowRate_link(ii) = obj.Links{ii}.cylindricalConductance * ...
+                        abs(obj.Nodes{node1Index}.waterPressure - ...                         
+                        obj.Nodes{node2Index}.waterPressure);  
+                    
+                elseif obj.Links{ii}.isInlet 
+                    
+                    % calculate the flow rate of the fluid
+                    flowRate_link(ii) = obj.Links{ii}.cylindricalConductance * ...
+                        abs(inletPressure - ...                         
+                        obj.Nodes{node2Index}.waterPressure);  
+                    obj.totalFlowRate = obj.totalFlowRate + flowRate_link(ii);
+                else 
+                    
+                    % calculate the flow rate of the fluid
+                    flowRate_link(ii) = obj.Links{ii}.cylindricalConductance * ...
+                        abs(obj.Nodes{node1Index}.waterPressure - ...                         
+                        outletPressure); 
+                end 
+                obj.Links{ii}.flow = flowRate_link(ii)*10^14;
+                residenceTime_link(ii) = obj.Links{ii}.volume/flowRate_link(ii);
+                diffusion_link (ii) = effectiveDiffusion * obj.Links{ii}.area / obj.Links{ii}.linkLength;
+            end
+            obj.vtkWriter_glyph('init',0);
+            
+            timeStep = min(nonzeros(residenceTime_link)); 
+%             timeStep = timeStep /2; 
+            
+            % calculation of 3 Unknowns (concentration of nodes & links) in each timeStep 
+             
+            t = 0; 
+            time = 0;
+            simulationTime = simulationVolume / obj.totalFlowRate;
+            injectionTime = poreVolumeInjected / obj.totalFlowRate;
+            
+            timePlot = zeros(round(simulationTime/timeStep)+1 ,1);
+            flux_averagedConcentration = zeros(round(simulationTime/timeStep)+1 ,1);
+            obj.BreakThroughCurve_singlePhase = zeros(round(simulationTime/timeStep)+1 ,2);
+            soluteConcentration1 = soluteConcentration;
+                  
+            while time < simulationTime
+                
+                if time > injectionTime
+                    soluteConcentration = 0;
+                end
+                
+                t = t+1;
+                time = time + timeStep;
+                timePlot(t) = time;
+                sumOfConcentration = 0;
+                sumOfFlowRate = 0;
+                 
+                diffusion_node = zeros(obj.numberOfNodes,1);
+                Factor = zeros(obj.numberOfNodes + obj.numberOfLinks, obj.numberOfNodes + obj.numberOfLinks);
+                Known = zeros(obj.numberOfNodes + obj.numberOfLinks, 1); 
+                % calculate concentration of nodes & links based on eq. 8 & 9
+                for i = 1:obj.numberOfNodes + obj.numberOfLinks
+                    if i <= obj.numberOfNodes
+                        for j = 1:obj.Nodes{i}.connectionNumber 
+                            
+                            connectedLinkIndex = obj.Nodes{i}.connectedLinks(j);
+                            connectedNodeIndex = obj.Nodes{i}.connectedNodes(j);
+                            jj = obj.numberOfNodes + connectedLinkIndex;
+                            
+                            diffusion_node(i) = diffusion_node(i) + diffusion_link(connectedLinkIndex);                             
+                            Factor(i, jj) = -timeStep / obj.Nodes{i}.volume * diffusion_link(connectedLinkIndex);
+                            
+                            % determine link flowing into this node
+                            if connectedNodeIndex ~= 0 && connectedNodeIndex ~= -1
+                                
+                                if obj.Nodes{connectedNodeIndex}.waterPressure > obj.Nodes{i}.waterPressure
+                                    Factor(i, i) = Factor(i, i) + timeStep / obj.Nodes{i}.volume * flowRate_link(connectedLinkIndex);
+                                    Factor(i, jj) = Factor(i, jj) - timeStep / obj.Nodes{i}.volume * flowRate_link(connectedLinkIndex); 
+                                end                                
+                                Factor(i, i) = Factor(i, i) + timeStep / obj.Nodes{i}.volume * diffusion_link(connectedLinkIndex);
+                            elseif connectedNodeIndex == -1
+                                Factor(i, i) = Factor(i, i) + ...
+                                    timeStep / obj.Nodes{i}.volume * (flowRate_link(connectedLinkIndex) + diffusion_link(connectedLinkIndex));
+                                Factor(i, jj) = Factor(i, jj) - timeStep / obj.Nodes{i}.volume * flowRate_link(connectedLinkIndex);  
+                            end
+                        end
+                        
+                        Factor(i, i) = 1 + Factor(i, i);
+                        Known(i,1) = obj.Nodes{i}.concentration(t);
+                    else
+                        jj = i - obj.numberOfNodes;
+                        node1Index = obj.Links{jj}.pore1Index;
+                        node2Index = obj.Links{jj}.pore2Index;                        
+                        Known(i,1) = obj.Links{jj}.concentration(t); 
+                        Factor(i, i) = 1 + timeStep  / obj.Links{jj}.volume * (flowRate_link(jj)+ diffusion_link(jj)) ;
+                        
+                        if ~obj.Links{jj}.isInlet && ~obj.Links{jj}.isOutlet
+                            if obj.Nodes{node1Index}.waterPressure > obj.Nodes{node2Index}.waterPressure
+                                Factor(i, node1Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                    (flowRate_link(jj)+ diffusion_link(jj)) ;
+                                Factor(i, node2Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                    (diffusion_link(jj)) ;
+                            elseif obj.Nodes{node2Index}.waterPressure > obj.Nodes{node1Index}.waterPressure
+                                Factor(i, node2Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                    (flowRate_link(jj)+ diffusion_link(jj)) ;
+                                Factor(i, node1Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                    (diffusion_link(jj)) ;
+                            end
+                        elseif obj.Links{jj}.isInlet
+                            Factor(i, node2Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                (diffusion_link(jj)) ;
+                            Known(i,1) = Known(i,1) + soluteConcentration * timeStep  / obj.Links{jj}.volume * ...
+                                    (flowRate_link(jj)+ diffusion_link(jj));
+                        elseif obj.Links{jj}.isOutlet 
+                            Factor(i, i) = 0 ; 
+                            Known(i,1) = Known(i,1) - obj.Links{jj}.concentration(t);
+                        end
+                    end
+                end
+                
+                nodesConcentration_new = gmres (Factor, Known,[], 1e-10, obj.numberOfNodes + obj.numberOfLinks);
+                
+                % asign new concentration of nodes
+                for i = 1:obj.numberOfNodes
+                    if nodesConcentration_new(i) > soluteConcentration1
+                        obj.Nodes{i}.concentration(t+1) = soluteConcentration1;
+                    else
+                        obj.Nodes{i}.concentration(t+1) = nodesConcentration_new(i);
+                    end
+                end
+                
+                % calculate new concentration of links
+                for i = 1:obj.numberOfLinks 
+                    jj = i + obj.numberOfNodes;
+                    if nodesConcentration_new(jj) > soluteConcentration1
+                        obj.Links{i}.concentration(t+1) = soluteConcentration1;
+                    else
+                        obj.Links{i}.concentration(t+1) = nodesConcentration_new(jj);
+                    end
+                    if obj.Links{i}.isOutlet 
+                        obj.Links{i}.concentration(t+1) = nodesConcentration_new(obj.Links{ii}.pore1Index);
+                        sumOfConcentration = sumOfConcentration + ...
+                            obj.Links{i}.concentration(t)*flowRate_link(i);
+                        sumOfFlowRate = sumOfFlowRate + flowRate_link(i);
+                    end
+                end
+                % calculate BreakThroughCurve at outlet of network
+                flux_averagedConcentration(t) = sumOfConcentration / sumOfFlowRate / soluteConcentration1;
+                
+            obj.BreakThroughCurve_singlePhase(t,1) = timePlot(t);
+            obj.BreakThroughCurve_singlePhase(t,2) = flux_averagedConcentration(t);
+%                 fileName = obj.vtkWriter_glyph('Diff',t); 
+            end
+             
+%             obj.BreakThroughCurve_singlePhase(:,1) = timePlot;
+%             obj.BreakThroughCurve_singlePhase(:,2) = flux_averagedConcentration;
+            
+            % Plot   
+            plot(timePlot,flux_averagedConcentration,'*');
+        end
+        
+        % Single phase Reactive transport_Edgar 
+        
+        function calculateReactiveTransport_SinglePhaseDiffusion(obj, inletPressure, outletPressure, soluteConcentration, simulationVolume, poreVolumeInjected) 
+            
+            % calculate pressure distribution
+            pressureDistribution_Cylindrical (obj, inletPressure, outletPressure); 
+            
+            residenceTime_link = zeros(obj.numberOfLinks,1);
+            flowRate_link = zeros(obj.numberOfLinks,1);
+            obj.totalFlowRate = 0;            
+            effectiveDiffusion = 10^ (-9);         
+            diffusion_link = zeros(obj.numberOfLinks,1);
+            
+            % calculate flowrate of links residence time                          
+            for ii = 1:obj.numberOfLinks                
+                
+                node1Index = obj.Links{ii}.pore1Index;
+                node2Index = obj.Links{ii}.pore2Index;
+                
+                if ~obj.Links{ii}.isInlet && ~obj.Links{ii}.isOutlet      
+                    
+                    % calculate the flow rate of the fluid
+                    flowRate_link(ii) = obj.Links{ii}.cylindricalConductance * ...
+                        abs(obj.Nodes{node1Index}.waterPressure - ...                         
+                        obj.Nodes{node2Index}.waterPressure);  
+                    
+                elseif obj.Links{ii}.isInlet 
+                    
+                    % calculate the flow rate of the fluid
+                    flowRate_link(ii) = obj.Links{ii}.cylindricalConductance * ...
+                        abs(inletPressure - ...                         
+                        obj.Nodes{node2Index}.waterPressure);  
+                    obj.totalFlowRate = obj.totalFlowRate + flowRate_link(ii);
+                else 
+                    
+                    % calculate the flow rate of the fluid
+                    flowRate_link(ii) = obj.Links{ii}.cylindricalConductance * ...
+                        abs(obj.Nodes{node1Index}.waterPressure - ...                         
+                        outletPressure); 
+                end 
+                obj.Links{ii}.flow = flowRate_link(ii)*10^14;
+                residenceTime_link(ii) = obj.Links{ii}.volume/flowRate_link(ii);
+                diffusion_link (ii) = effectiveDiffusion * obj.Links{ii}.area / obj.Links{ii}.linkLength;
+            end
+            obj.vtkWriter_glyph('init',0);
+            
+            timeStep = min(nonzeros(residenceTime_link)); 
+%             timeStep = timeStep /2; 
+            
+            % calculation of 3 Unknowns (concentration of nodes & links) in each timeStep 
+             
+            t = 0; 
+            time = 0;
+            simulationTime = simulationVolume / obj.totalFlowRate;
+            injectionTime = poreVolumeInjected / obj.totalFlowRate;
+            
+            timePlot = zeros(round(simulationTime/timeStep)+1 ,1);
+            flux_averagedConcentration = zeros(round(simulationTime/timeStep)+1 ,1);
+            obj.BreakThroughCurve_singlePhase = zeros(round(simulationTime/timeStep)+1 ,2);
+            soluteConcentration1 = soluteConcentration;
+                  
+            while time < simulationTime
+                
+                if time > injectionTime
+                    soluteConcentration = 0;
+                end
+                
+                t = t+1;
+                time = time + timeStep;
+                timePlot(t) = time;
+                sumOfConcentration = 0;
+                sumOfFlowRate = 0;
+                 
+                diffusion_node = zeros(obj.numberOfNodes,1);
+                Factor = zeros(obj.numberOfNodes + obj.numberOfLinks, obj.numberOfNodes + obj.numberOfLinks);
+                Known = zeros(obj.numberOfNodes + obj.numberOfLinks, 1); 
+                % calculate concentration of nodes & links based on eq. 8 & 9
+                for i = 1:obj.numberOfNodes + obj.numberOfLinks
+                    if i <= obj.numberOfNodes
+                        for j = 1:obj.Nodes{i}.connectionNumber 
+                            
+                            connectedLinkIndex = obj.Nodes{i}.connectedLinks(j);
+                            connectedNodeIndex = obj.Nodes{i}.connectedNodes(j);
+                            jj = obj.numberOfNodes + connectedLinkIndex;
+                            
+                            diffusion_node(i) = diffusion_node(i) + diffusion_link(connectedLinkIndex);                             
+                            Factor(i, jj) = -timeStep / obj.Nodes{i}.volume * diffusion_link(connectedLinkIndex);
+                            
+                            % determine link flowing into this node
+                            if connectedNodeIndex ~= 0 && connectedNodeIndex ~= -1
+                                
+                                if obj.Nodes{connectedNodeIndex}.waterPressure > obj.Nodes{i}.waterPressure
+                                    Factor(i, i) = Factor(i, i) + timeStep / obj.Nodes{i}.volume * flowRate_link(connectedLinkIndex);
+                                    Factor(i, jj) = Factor(i, jj) - timeStep / obj.Nodes{i}.volume * flowRate_link(connectedLinkIndex); 
+                                end                                
+                                Factor(i, i) = Factor(i, i) + timeStep / obj.Nodes{i}.volume * diffusion_link(connectedLinkIndex);
+                            elseif connectedNodeIndex == -1
+                                Factor(i, i) = Factor(i, i) + ...
+                                    timeStep / obj.Nodes{i}.volume * (flowRate_link(connectedLinkIndex) + diffusion_link(connectedLinkIndex));
+                                Factor(i, jj) = Factor(i, jj) - timeStep / obj.Nodes{i}.volume * flowRate_link(connectedLinkIndex);  
+                            end
+                        end
+                        
+                        Factor(i, i) = 1 + Factor(i, i);
+                        Known(i,1) = obj.Nodes{i}.concentration(t);
+                    else
+                        jj = i - obj.numberOfNodes;
+                        node1Index = obj.Links{jj}.pore1Index;
+                        node2Index = obj.Links{jj}.pore2Index;                        
+                        Known(i,1) = obj.Links{jj}.concentration(t); 
+                        Factor(i, i) = 1 + timeStep  / obj.Links{jj}.volume * (flowRate_link(jj)+ diffusion_link(jj)) ;
+                        
+                        if ~obj.Links{jj}.isInlet && ~obj.Links{jj}.isOutlet
+                            if obj.Nodes{node1Index}.waterPressure > obj.Nodes{node2Index}.waterPressure
+                                Factor(i, node1Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                    (flowRate_link(jj)+ diffusion_link(jj)) ;
+                                Factor(i, node2Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                    (diffusion_link(jj)) ;
+                            elseif obj.Nodes{node2Index}.waterPressure > obj.Nodes{node1Index}.waterPressure
+                                Factor(i, node2Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                    (flowRate_link(jj)+ diffusion_link(jj)) ;
+                                Factor(i, node1Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                    (diffusion_link(jj)) ;
+                            end
+                        elseif obj.Links{jj}.isInlet
+                            Factor(i, node2Index) = - timeStep  / obj.Links{jj}.volume * ...
+                                (diffusion_link(jj)) ;
+                            Known(i,1) = Known(i,1) + soluteConcentration * timeStep  / obj.Links{jj}.volume * ...
+                                    (flowRate_link(jj)+ diffusion_link(jj));
+                        elseif obj.Links{jj}.isOutlet 
+                            Factor(i, i) = 0 ; 
+                            Known(i,1) = Known(i,1) - obj.Links{jj}.concentration(t);
+                        end
+                    end
+                end
+                
+                nodesConcentration_new = gmres (Factor, Known,[], 1e-10, obj.numberOfNodes + obj.numberOfLinks);
+                
+                % asign new concentration of nodes
+                for i = 1:obj.numberOfNodes
+                    if nodesConcentration_new(i) > soluteConcentration1
+                        obj.Nodes{i}.concentration(t+1) = soluteConcentration1;
+                    else
+                        obj.Nodes{i}.concentration(t+1) = nodesConcentration_new(i);
+                    end
+                end
+                
+                % calculate new concentration of links
+                for i = 1:obj.numberOfLinks 
+                    jj = i + obj.numberOfNodes;
+                    if nodesConcentration_new(jj) > soluteConcentration1
+                        obj.Links{i}.concentration(t+1) = soluteConcentration1;
+                    else
+                        obj.Links{i}.concentration(t+1) = nodesConcentration_new(jj);
+                    end
+                    if obj.Links{i}.isOutlet 
+                        obj.Links{i}.concentration(t+1) = nodesConcentration_new(obj.Links{ii}.pore1Index);
+                        sumOfConcentration = sumOfConcentration + ...
+                            obj.Links{i}.concentration(t)*flowRate_link(i);
+                        sumOfFlowRate = sumOfFlowRate + flowRate_link(i);
+                    end
+                end
+                % calculate BreakThroughCurve at outlet of network
+                flux_averagedConcentration(t) = sumOfConcentration / sumOfFlowRate / soluteConcentration1;
+                
+            obj.BreakThroughCurve_singlePhase(t,1) = timePlot(t);
+            obj.BreakThroughCurve_singlePhase(t,2) = flux_averagedConcentration(t);
+%                 fileName = obj.vtkWriter_glyph('Diff',t); 
+            end
+             
+%             obj.BreakThroughCurve_singlePhase(:,1) = timePlot;
+%             obj.BreakThroughCurve_singlePhase(:,2) = flux_averagedConcentration;
+            
+            % Plot   
+            plot(timePlot,flux_averagedConcentration,'*');
+        end
+        
+        % Single phase Reactive transport_Raoof_2010
+        function calculateReactiveTransport_SinglePhaseDesorption(obj, inletPressure, outletPressure, soluteConcentration, simulationVolume,poreVolumeInjected)
             
             % calculate pressure distribution
             pressureDistribution_Cylindrical (obj, inletPressure, outletPressure); 
@@ -672,7 +1027,7 @@ classdef Network < handle & Fluids
             
             % Set time step to avoid numerical dispersion
             timeStep = min(nonzeros(residenceTime_link));
-            timeStep = timeStep * 40;             
+%             timeStep = timeStep * 40;             
             % for perfect mixing must be less than 1: diffusion is dominant
             % rather than advection
             diffusionCoefficent = 1e-9;
@@ -689,8 +1044,9 @@ classdef Network < handle & Fluids
             
             t = 0; 
             time = 0;                
-            simulationTime = obj.poreVolume / obj.totalFlowRate*2;
+            simulationTime = simulationVolume / obj.totalFlowRate;
             injectionTime = poreVolumeInjected / obj.totalFlowRate;
+            
             timePlot = zeros(round(simulationTime/timeStep)+1 ,1);
             flux_averagedConcentration = zeros(round(simulationTime/timeStep)+1 ,1);
             obj.BreakThroughCurve_singlePhase = zeros(round(simulationTime/timeStep)+1 ,2);
@@ -768,8 +1124,8 @@ classdef Network < handle & Fluids
             
             % asign new concentration of nodes
             for i = 1:obj.numberOfNodes
-%                 if nodesConcentration_new(i) > soluteConcentration
-%                 obj.Nodes{i}.concentration(t+1) = soluteConcentration;
+%                 if nodesConcentration_new(i) > soluteConcentration1
+%                 obj.Nodes{i}.concentration(t+1) = soluteConcentration1;
 %                 elseif nodesConcentration_new(i) < 0
 %                  obj.Nodes{i}.concentration(t+1) = 0;
 %                 else
@@ -819,6 +1175,7 @@ classdef Network < handle & Fluids
             % calculate BreakThroughCurve at outlet of network
             flux_averagedConcentration(t) = sumOfConcentration / sumOfFlowRate / soluteConcentration1; 
             
+%                 fileName = obj.vtkWriter_glyph('Diff',t);
             % Plot & Animation
             addpoints(h,timePlot(t),flux_averagedConcentration(t)); 
             drawnow
@@ -1546,21 +1903,21 @@ classdef Network < handle & Fluids
         % Primary Drainage  
         function PrimaryDrainage(obj, inletPressure, outletPressure)              
              % determining the capillary pressure level interval
-             Pc_threshold = zeros(2*obj.numberOfLinks,1);  
-             Pc_threshold_n = zeros(obj.numberOfLinks,1); 
+             Pc_threshold = nan(obj.numberOfLinks+obj.numberOfNodes ,2);  
              for i = 1:obj.numberOfLinks   
                  obj.Links{i}.waterPressure = 0;
                  obj.Links{i}.calculateThresholdPressurePistonLike_drainage();
-                 Pc_threshold(i,1) = obj.Links{i}.drainThresholdPressure_PistonLike;
+                 Pc_threshold(i,2) = obj.Links{i}.drainThresholdPressure_PistonLike;
              end 
              for i = 1:obj.numberOfNodes                
                   obj.Nodes{i}.waterPressure = 0;               
-                  obj.Nodes{i}.calculateThresholdPressurePistonLike_drainage();
-                  Pc_threshold(i+obj.numberOfLinks) = obj.Nodes{i}.drainThresholdPressure_PistonLike; 
+                  obj.Nodes{i}.calculateThresholdPressurePistonLike_drainage(); 
+                 Pc_threshold(i,2) = obj.Nodes{i}.drainThresholdPressure_PistonLike;
              end  
-             max_Pc = max(Pc_threshold); 
-             min_Pc = min(nonzeros(Pc_threshold)); 
-             Pc_interval = (max_Pc-min_Pc)/10;  
+             max_Pc = max(Pc_threshold(:,2)); 
+             min_Pc = min(Pc_threshold(:,2)); 
+             Pc_interval = (max_Pc-min_Pc)/10;               
+             Pc_threshold = nan(obj.numberOfLinks,2);  
              
              Pc = min_Pc; 
              lastMaxP = Pc;
@@ -1572,7 +1929,7 @@ classdef Network < handle & Fluids
              LinkL = zeros(obj.numberOfLinks); 
              cluster_A_nums =[];
              [~, NodeL_W, LinkL_W,cluster_A,cluster_B] = Clustering_water(obj); 
-             
+             a = 0;
              % Cycle of increasing Pressure
              while Pc <= obj.Pc_drain_max *1.0001 
               press = 1; 
@@ -1581,36 +1938,42 @@ classdef Network < handle & Fluids
                   node1Index = obj.Links{i}.pore1Index;
                   node2Index = obj.Links{i}.pore2Index;
                   if obj.Links{i}.isInlet && obj.Links{i}.occupancy == 'A'
-                         if (any(LinkL_W(i) == cluster_A(:))) && Pc_threshold(i) <= Pc 
+                         if (any(LinkL_W(i) == cluster_A(:))) && obj.Links{i}.drainThresholdPressure_PistonLike <= Pc 
                              obj.Links{i}.occupancy = 'B';                              
                              invaded = invaded + 1;   
-                             if  obj.Nodes{node2Index}.occupancy == 'A' &&obj.Nodes{node2Index}.drainThresholdPressure_PistonLike <=Pc  &&...
+                             if  obj.Nodes{node2Index}.occupancy == 'A' &&...
                                      (any(NodeL_W(node2Index) == cluster_A(:)) ||  any(NodeL_W(node2Index) == cluster_B(:)))
                                  
                                  obj.Nodes{node2Index}.occupancy = 'B';
                                  invaded = invaded + 1; 
                                  for j=1:obj.Nodes{node2Index}.connectionNumber
                                      if obj.Nodes{node2Index}.connectedLinks(j)~=i
-                                         Pc_threshold_n(obj.Nodes{node2Index}.connectedLinks(j),1)= Pc_threshold(obj.Nodes{node2Index}.connectedLinks(j));
+                                         a = a +1;
+                                         Pc_threshold(obj.Nodes{node2Index}.connectedLinks(j),1)= a;
+                                         Pc_threshold(obj.Nodes{node2Index}.connectedLinks(j),2)= obj.Links{obj.Nodes{node2Index}.connectedLinks(j)}.drainThresholdPressure_PistonLike;
                                      end
                                  end
                              end
                          end
                   elseif obj.Links{i}.isOutlet && obj.Links{i}.occupancy == 'A'                     
-                           if obj.Nodes{node1Index}.occupancy == 'B'  
-                               Pc_threshold_n(i,1)= Pc_threshold(i); 
+                           if obj.Nodes{node1Index}.occupancy == 'B'
+                               a = a +1;
+                               Pc_threshold(i,1)= a;
+                               Pc_threshold(i,2)= obj.Links{i}.drainThresholdPressure_PistonLike; 
                            end
                   elseif ~obj.Links{i}.isOutlet && ~obj.Links{i}.isInlet && obj.Links{i}.occupancy == 'A'                    
                       if obj.Nodes{node1Index}.occupancy == 'B' || obj.Nodes{node2Index}.occupancy == 'B'
                           if (any(LinkL_W(i) == cluster_A(:)) ||  any(LinkL_W(i) == cluster_B(:)))
-                              Pc_threshold_n(i,1)= Pc_threshold(i);  
+                              a = a +1;
+                              Pc_threshold(i,1)= a;
+                              Pc_threshold(i,2)= obj.Links{i}.drainThresholdPressure_PistonLike;  
                           end
                       end  
                   end 
              end
              deltaS = 0;
              deltaV = 0;  
-             if (any(nonzeros(Pc_threshold_n)) && min(nonzeros(Pc_threshold_n))<= Pc) %|| Pc == max_Pc
+             if (any(Pc_threshold(:,2)) && min(Pc_threshold(:,2))<= Pc) %|| Pc == max_Pc
                  pressure = 1;
              else
                  pressure = 0;
@@ -1620,13 +1983,14 @@ classdef Network < handle & Fluids
              while  pressure == 1 && deltaS <= 0.1 
                     
                  %check & sort Links based on Pc_Threshold
-                 [~, ix] = sort(Pc_threshold_n(1:end), 1);
-                 i = ix(obj.numberOfLinks - length(nonzeros(Pc_threshold_n))+1);
-                 
-                 if lastMaxP < Pc_threshold_n(i)
-                     lastMaxP = Pc_threshold_n(i);
+                 [th,it] = sort(Pc_threshold(1:end,2)); 
+                 [~, ix] = min(Pc_threshold(1:end,2)); 
+                 i = Pc_threshold(ix,1);
+                 if lastMaxP < Pc_threshold(i,2)
+                     lastMaxP = Pc_threshold(i,2);
                  end
-                 Pc_threshold_n(i) = 0;   
+                 Pc_threshold(ix,1:2) = nan;   
+                 a = a-1;
                  node1Index = obj.Links{i}.pore1Index;
                  node2Index = obj.Links{i}.pore2Index;
                  
@@ -1645,7 +2009,7 @@ classdef Network < handle & Fluids
                           invaded = invaded + 1;
                           deltaV = deltaV + obj.Links{i}.volume ;  
                           
-                          if  obj.Nodes{node2Index}.occupancy == 'A' && obj.Nodes{node2Index}.drainThresholdPressure_PistonLike <=Pc  && ...                                  
+                          if  obj.Nodes{node2Index}.occupancy == 'A' && ...                                  
                                    (any(NodeL_W(node2Index) == cluster_A(:)) ||  any(NodeL_W(node2Index) == cluster_B(:)))
                                
                               obj.Nodes{node2Index}.occupancy = 'B'; 
@@ -1653,12 +2017,14 @@ classdef Network < handle & Fluids
                               deltaV = deltaV + obj.Nodes{node2Index}.volume ;  
                               for j=1:obj.Nodes{node2Index}.connectionNumber
                                  if obj.Nodes{node2Index}.connectedLinks(j)~=i
-                                     Pc_threshold_n(obj.Nodes{node2Index}.connectedLinks(j),1)= Pc_threshold(obj.Nodes{node2Index}.connectedLinks(j));
+                                     a = a +1;
+                                     Pc_threshold(obj.Nodes{node2Index}.connectedLinks(j),1)= a;
+                                     Pc_threshold(obj.Nodes{node2Index}.connectedLinks(j),2)= obj.Links{obj.Nodes{node2Index}.connectedLinks(j)}.drainThresholdPressure_PistonLike;
                                  end
                              end
                           end   
                           
-                          if obj.Nodes{node1Index}.occupancy == 'A' && obj.Nodes{node1Index}.drainThresholdPressure_PistonLike <=Pc && ...
+                          if obj.Nodes{node1Index}.occupancy == 'A' && ...
                                    (any(NodeL_W(node1Index) == cluster_A(:)) ||  any(NodeL_W(node1Index) == cluster_B(:)))
                                
                               obj.Nodes{node1Index}.occupancy = 'B';
@@ -1666,7 +2032,9 @@ classdef Network < handle & Fluids
                               invaded = invaded + 1; 
                               for j=1:obj.Nodes{node1Index}.connectionNumber
                                  if obj.Nodes{node1Index}.connectedLinks(j)~=i
-                                     Pc_threshold_n(obj.Nodes{node1Index}.connectedLinks(j),1)= Pc_threshold(obj.Nodes{node1Index}.connectedLinks(j));
+                                     a = a +1;
+                                     Pc_threshold(obj.Nodes{node1Index}.connectedLinks(j),1)= a;
+                                     Pc_threshold(obj.Nodes{node1Index}.connectedLinks(j),2)= obj.Links{obj.Nodes{node1Index}.connectedLinks(j)}.drainThresholdPressure_PistonLike;
                                  end
                              end
                           end
@@ -1676,28 +2044,21 @@ classdef Network < handle & Fluids
                    if deltaS > 0.1
                      press = 0;
                    end
-                 if any (nonzeros(Pc_threshold_n)) && min(nonzeros(Pc_threshold_n))<= Pc
+                 if any (Pc_threshold(:,2)) && min(Pc_threshold(:,2))<= Pc
                      pressure = 1;
                  else
                      pressure = 0;
-                 end
-                 if invaded == 1 || invaded == 2
-                     break
-                 end
+                 end 
              end
-               if Pc == max_Pc
-                   lastMaxP = max_Pc;
-               end
-               
+                  
              % Updating element saturations and conductances
              calculateConductance_and_Saturation_Drainage(obj, lastMaxP); 
              pressureDistribution_TwoPhases(obj, inletPressure, outletPressure); 
              
              % Relative Permeability Calculation              
              [Krw , Kro] = calculateRelativePermeability_Drainage (obj, outletPressure, LinkL, LinkL_W, cluster_A_nums, cluster_A);             
-             obj.DrainageData(t,:) = [obj.waterSaturation, lastMaxP, Krw, Kro, invaded]; 
-%              fileName = obj.vtkWriter('PD',t);
-             fileName = obj.vtkWriter_glyph('PD',t);
+             obj.DrainageData(t,:) = [obj.waterSaturation, lastMaxP, Krw, Kro, invaded];  
+             obj.vtkWriter_glyph('PD',t);
              if invaded ~= 0                 
                  [~, ~, LinkL,cluster_A_nums,~] = Clustering_oil(obj);  
              end
@@ -2547,8 +2908,8 @@ classdef Network < handle & Fluids
                 
         end  
         
-        function fileName = vtkWriter_glyph(obj,process,i)
-            num = num2str(i, '%0.3d');
+        function fileName = vtkWriter_glyph(obj,process,ii)
+            num = num2str(ii, '%0.3d');
             fileName = strcat(process,'_glyph',num,'.vtk');
             vtkFileID = fopen(fileName,'w');
             if vtkFileID == -1
@@ -2565,7 +2926,7 @@ classdef Network < handle & Fluids
             
             fprintf ( vtkFileID, 'POINTS %d double\n', points );
             for i = 1:obj.numberOfNodes 
-                    fprintf( vtkFileID,'%d %d %d \n', obj.Nodes{i}.x_coordinate, obj.Nodes{i}.y_coordinate, obj.Nodes{i}.z_coordinate); 
+                fprintf( vtkFileID,'%d %d %d \n', obj.Nodes{i}.x_coordinate, obj.Nodes{i}.y_coordinate, obj.Nodes{i}.z_coordinate);
             end    
             
             for i = 1:obj.numberOfNodes
@@ -2594,167 +2955,196 @@ classdef Network < handle & Fluids
             
             % Initializing
             if strcmp(process , 'init')== 1 
-            fprintf ( vtkFileID, 'POINT_DATA  %d \n', obj.numberOfNodes+imaginaryPoints);
-            fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
-            for i = 1:obj.numberOfNodes 
-                fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius); 
-            end 
-            for i = 1:obj.numberOfNodes
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius*0.001);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius*0.001); 
+                
+                % Nodes Data
+                fprintf ( vtkFileID, 'POINT_DATA  %d \n', obj.numberOfNodes+imaginaryPoints);
+                % Volume  
+                fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfNodes
+                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius);
                 end
-            end   
-            fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
-            for i = 1:obj.numberOfNodes 
-                fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.waterPressure); 
-            end 
-            for i = 1:obj.numberOfNodes
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', 1);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', 0); 
+                for i = 1:obj.numberOfNodes
+                    if obj.Nodes{i}.isInlet
+                        fprintf( vtkFileID,'%3.8f \n', 0);
+                    elseif obj.Nodes{i}.isOutlet
+                        fprintf( vtkFileID,'%3.8f \n', 0);
+                    end
                 end
-            end   
+                % Pressure
+                fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfNodes
+                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.waterPressure);
+                end
+                for i = 1:obj.numberOfNodes
+                    if obj.Nodes{i}.isInlet
+                        fprintf( vtkFileID,'%3.8f \n', 1);
+                    elseif obj.Nodes{i}.isOutlet
+                        fprintf( vtkFileID,'%3.8f \n', 0);
+                    end
+                end
+                
+                % Links Data
+                fprintf ( vtkFileID, 'CELL_DATA  %d \n',obj.numberOfLinks);
+                % Volume 
+                fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfLinks
+                    fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.radius);
+                end
+                % Pressure
+                fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfLinks
+                    fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.waterPressure);
+                end
+                % Flow
+                fprintf ( vtkFileID, 'SCALARS flow float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfLinks
+                    fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.flow);
+                end
             
-            fprintf ( vtkFileID, 'CELL_DATA  %d \n',obj.numberOfLinks);
-            fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n'); 
-            for i = 1:obj.numberOfLinks  
-                fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.waterPressure);
-            end  
             
             % Diffusion
-            elseif strcmp(process , 'Diff')== 1 
-            fprintf ( vtkFileID, 'POINT_DATA  %d \n', obj.numberOfNodes+imaginaryPoints);
-            fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
-            for i = 1:obj.numberOfNodes 
-                fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius); 
-            end 
-            for i = 1:obj.numberOfNodes
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius*0.001);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius*0.001); 
+            elseif strcmp(process , 'Diff')== 1
+                
+                % Nodes Data
+                fprintf ( vtkFileID, 'POINT_DATA  %d \n', obj.numberOfNodes+imaginaryPoints);
+                % Volume 
+                fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfNodes
+                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius);
                 end
-            end  
-            fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
-            for i = 1:obj.numberOfNodes 
-                fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.waterPressure); 
-            end 
-            for i = 1:obj.numberOfNodes
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', 1);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', 0); 
+                for i = 1:obj.numberOfNodes
+                    if obj.Nodes{i}.isInlet
+                        fprintf( vtkFileID,'%3.8f \n', 0);
+                    elseif obj.Nodes{i}.isOutlet
+                        fprintf( vtkFileID,'%3.8f \n', 0);
+                    end
                 end
-            end  
-            fprintf ( vtkFileID, 'SCALARS concentration float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
-            for i = 1:obj.numberOfNodes 
-                fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.concentration); 
-            end
-            for i = 1:obj.numberOfNodes
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', 1);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', 0); 
+                % Pressure
+                fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfNodes
+                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.waterPressure);
                 end
-            end  
-            
-            fprintf ( vtkFileID, 'CELL_DATA  %d \n',obj.numberOfLinks );
-            fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n'); 
-            for i = 1:obj.numberOfLinks  
-                fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.radius);
-            end  
-            fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n'); 
-            for i = 1:obj.numberOfLinks  
-                fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.waterPressure);
-            end    
-            fprintf ( vtkFileID, 'SCALARS concentration float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n'); 
-            for i = 1:obj.numberOfLinks  
-                fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.concentration);
-            end   
-            % Primary Drainage
-            elseif strcmp(process , 'PD')== 1 || strcmp(process , 'SI')== 1 
-            fprintf ( vtkFileID, 'POINT_DATA  %d \n', obj.numberOfNodes+imaginaryPoints);
-            fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
-            for i = 1:obj.numberOfNodes 
-                fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius); 
-            end 
-            for i = 1:obj.numberOfNodes
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius*0.001);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius*0.001); 
+                for i = 1:obj.numberOfNodes
+                    if obj.Nodes{i}.isInlet
+                        fprintf( vtkFileID,'%3.8f \n', 1);
+                    elseif obj.Nodes{i}.isOutlet
+                        fprintf( vtkFileID,'%3.8f \n', 0);
+                    end
                 end
-            end  
-            fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
-            for i = 1:obj.numberOfNodes 
-                fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.waterPressure); 
-            end 
-            for i = 1:obj.numberOfNodes
-                if strcmp(process , 'PD')== 1
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', 0);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', 1); 
+                % Concentration
+                fprintf ( vtkFileID, 'SCALARS concentration float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfNodes
+                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.concentration(ii));
                 end
-                elseif strcmp(process , 'SI')== 1 
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', 1);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', 0); 
+                for i = 1:obj.numberOfNodes
+                    if obj.Nodes{i}.isInlet
+                        fprintf( vtkFileID,'%3.8f \n', 1);
+                    elseif obj.Nodes{i}.isOutlet
+                        fprintf( vtkFileID,'%3.8f \n', 0);
+                    end
                 end
+                
+                % Links Data
+                fprintf ( vtkFileID, 'CELL_DATA  %d \n',obj.numberOfLinks );
+                % Volume 
+                fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfLinks
+                    fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.radius);
                 end
-            end  
-            fprintf ( vtkFileID, 'SCALARS waterSaturation float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
-            for i = 1:obj.numberOfNodes 
-                fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.waterSaturation); 
-            end
-            for i = 1:obj.numberOfNodes
-                if strcmp(process , 'PD')== 1
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', 0);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', 1); 
+                % Pressure
+                fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfLinks
+                    fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.waterPressure);
                 end
-                elseif strcmp(process , 'SI')== 1 
-                if obj.Nodes{i}.isInlet 
-                    fprintf( vtkFileID,'%3.8f \n', 1);                     
-                elseif obj.Nodes{i}.isOutlet
-                    fprintf( vtkFileID,'%3.8f \n', 0); 
+                % Concentration
+                fprintf ( vtkFileID, 'SCALARS concentration float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfLinks
+                    fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.concentration(ii));
                 end
+                
+            % Primary Drainage or Secondary Imbibition
+            elseif strcmp(process , 'PD')== 1 || strcmp(process , 'SI')== 1
+                fprintf ( vtkFileID, 'POINT_DATA  %d \n', obj.numberOfNodes+imaginaryPoints);
+                fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfNodes
+                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius);
                 end
-            end  
-            
-            fprintf ( vtkFileID, 'CELL_DATA  %d \n',obj.numberOfLinks);
-            fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n'); 
-            for i = 1:obj.numberOfLinks   
-                fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.radius);
-            end  
-            fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n'); 
-            for i = 1:obj.numberOfLinks   
-                fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.waterPressure); 
-            end    
-            fprintf ( vtkFileID, 'SCALARS waterSaturation float  %d \n', 1);
-            fprintf ( vtkFileID, 'LOOKUP_TABLE default\n'); 
-            for i = 1:obj.numberOfLinks  
-                fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.waterSaturation);
-            end   
+                for i = 1:obj.numberOfNodes
+                    if obj.Nodes{i}.isInlet
+                        fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius*0.001);
+                    elseif obj.Nodes{i}.isOutlet
+                        fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.radius*0.001);
+                    end
+                end
+                fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfNodes
+                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.waterPressure);
+                end
+                for i = 1:obj.numberOfNodes
+                    if strcmp(process , 'PD')== 1
+                        if obj.Nodes{i}.isInlet
+                            fprintf( vtkFileID,'%3.8f \n', 0);
+                        elseif obj.Nodes{i}.isOutlet
+                            fprintf( vtkFileID,'%3.8f \n', 1);
+                        end
+                    elseif strcmp(process , 'SI')== 1
+                        if obj.Nodes{i}.isInlet
+                            fprintf( vtkFileID,'%3.8f \n', 1);
+                        elseif obj.Nodes{i}.isOutlet
+                            fprintf( vtkFileID,'%3.8f \n', 0);
+                        end
+                    end
+                end
+                fprintf ( vtkFileID, 'SCALARS waterSaturation float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfNodes
+                    fprintf( vtkFileID,'%3.8f \n', obj.Nodes{i}.waterSaturation);
+                end
+                for i = 1:obj.numberOfNodes
+                    if strcmp(process , 'PD')== 1
+                        if obj.Nodes{i}.isInlet
+                            fprintf( vtkFileID,'%3.8f \n', 0);
+                        elseif obj.Nodes{i}.isOutlet
+                            fprintf( vtkFileID,'%3.8f \n', 1);
+                        end
+                    elseif strcmp(process , 'SI')== 1
+                        if obj.Nodes{i}.isInlet
+                            fprintf( vtkFileID,'%3.8f \n', 1);
+                        elseif obj.Nodes{i}.isOutlet
+                            fprintf( vtkFileID,'%3.8f \n', 0);
+                        end
+                    end
+                end
+                
+                fprintf ( vtkFileID, 'CELL_DATA  %d \n',obj.numberOfLinks);
+                fprintf ( vtkFileID, 'SCALARS radius float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfLinks
+                    fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.radius);
+                end
+                fprintf ( vtkFileID, 'SCALARS pressure float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfLinks
+                    fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.waterPressure);
+                end
+                fprintf ( vtkFileID, 'SCALARS waterSaturation float  %d \n', 1);
+                fprintf ( vtkFileID, 'LOOKUP_TABLE default\n');
+                for i = 1:obj.numberOfLinks
+                    fprintf( vtkFileID,'%3.8f \n', obj.Links{i}.waterSaturation);
+                end
             end
                 
         end 

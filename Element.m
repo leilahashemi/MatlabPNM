@@ -32,6 +32,7 @@ classdef Element<Fluids
         
         waterPressure
         oilPressure     
+        flow = -1;
         
         occupancy = 'A';  % Element filled by Water
         b = zeros(1,4);
