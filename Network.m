@@ -11,14 +11,19 @@ classdef Network < handle & Fluids
         numberOfLinks
         numOfInletLinks      
         numOfOutletLinks
-        maxCoordinationNumber  
+        maxCoordinationNumber
+        averageCoordinationNumber
+        numOfIsolatedElements
+        numOfTriangularElements
+        numOfCircularElements
+        numOfSquareElements
         
         Porosity
         poreVolume
         networkVolume
         absolutePermeability
         ThSD
-        PSD
+        PSD 
         
         totalFlowRate
         totalFlowRate_o
@@ -30,6 +35,8 @@ classdef Network < handle & Fluids
         
         DrainageData
         ImbibitionData 
+        sequence
+        thresholdPressure
         BreakThroughCurve_singlePhase
         BreakThroughCurve_twoPhase
     end    
@@ -39,7 +46,7 @@ classdef Network < handle & Fluids
             
             % Opening the files
             link_1_fileID = fopen(strcat(fileName, '_link1.dat'));
-            obj.numberOfLinks = str2num(fgetl(link_1_fileID));
+            obj.numberOfLinks = str2double(fgetl(link_1_fileID));
             link_2_fileID = fopen(strcat(fileName, '_link2.dat'));
             
             node_2_fileID = fopen(strcat(fileName, '_node2.dat'));            
@@ -100,23 +107,35 @@ classdef Network < handle & Fluids
         function calculateNetworkProperties(obj, inletPressure, outletPressure)
             obj.ThSD = zeros(obj.numberOfLinks,1);
             obj.PSD = zeros(obj.numberOfNodes,1);
+            CoordinationNumber = zeros(obj.numberOfNodes,1);
             obj.numOfInletLinks = 0;
             obj.numOfOutletLinks = 0; 
+            obj.averageCoordinationNumber = 0;
+            obj.numOfIsolatedElements = 0;
+            obj.numOfTriangularElements = 0;
+            obj.numOfCircularElements = 0;
+            obj.numOfSquareElements = 0;
             nodesVolume = 0;
             linksVolume = 0;
 
             for ii = 1:obj.numberOfNodes
                 nodesVolume = nodesVolume + (obj.Nodes{ii}.volume); 
-                obj.maxCoordinationNumber(ii,1) = obj.Nodes{ii}.connectionNumber; 
-                obj.PSD(ii,1) = 2 * obj.Nodes{ii}.radius;
-%                 %Isolated element
-%                 if obj.Nodes{ii}.connectionNumber == 0
-%                     ii
-%                 end
+                CoordinationNumber(ii,1) = obj.Nodes{ii}.connectionNumber; 
+                obj.PSD(ii,1) = 2 * obj.Nodes{ii}.radius; 
+                %Isolated element
+                if obj.Nodes{ii}.connectionNumber == 0
+                    obj.numOfIsolatedElements = obj.numOfIsolatedElements + 1;
+                end
+                if strcmp(obj.Nodes{ii}.geometry , 'Circle')== 1
+                    obj.numOfCircularElements = obj.numOfCircularElements+1;
+                elseif strcmp(obj.Nodes{ii}.geometry , 'Triangle')== 1
+                    obj.numOfTriangularElements = obj.numOfTriangularElements+1;
+                else
+                    obj.numOfSquareElements = obj.numOfSquareElements+1;
+                end
             end 
-            obj.maxCoordinationNumber = max(obj.maxCoordinationNumber); 
-%             hist(obj.PSD);
-            
+%             hist(obj.PSD); 
+
             for ii = 1:obj.numberOfLinks 
                 linksVolume = linksVolume + (obj.Links{ii}.volume);
                 obj.ThSD (ii,1)= 2 * obj.Links{ii}.radius;
@@ -124,9 +143,19 @@ classdef Network < handle & Fluids
                     obj.numOfInletLinks = obj.numOfInletLinks + 1;
                 elseif obj.Links{ii}.isOutlet
                     obj.numOfOutletLinks = obj.numOfOutletLinks+1;                 
+                end             
+                if strcmp(obj.Links{ii}.geometry , 'Circle')== 1
+                    obj.numOfCircularElements = obj.numOfCircularElements+1;
+                elseif strcmp(obj.Links{ii}.geometry , 'Triangle')== 1
+                    obj.numOfTriangularElements = obj.numOfTriangularElements+1;
+                else
+                    obj.numOfSquareElements = obj.numOfSquareElements+1;
                 end
             end 
 %             hist(obj.ThSD);
+
+            obj.averageCoordinationNumber = sum(CoordinationNumber)/obj.numberOfNodes;
+            obj.maxCoordinationNumber = max(CoordinationNumber); 
             obj.networkVolume = obj.xDimension * obj.yDimension * obj.zDimension;
             obj.poreVolume = linksVolume + nodesVolume;
             obj.Porosity = obj.poreVolume * 100 / (obj.xDimension * obj.yDimension * obj.zDimension);      
@@ -262,8 +291,8 @@ classdef Network < handle & Fluids
                 % if the link is connected to inlet (index of node 1 is -1 which does not exist) 
                 if obj.Links{ii}.isInlet
                     nodeLinkSystemConductance = ((obj.Links{ii}.linkLength /...
-                        obj.Links{ii}.conductance*cond_factor) +...
-                        ((obj.Links{ii}.pore2Length / obj.Nodes{node2Index}.conductance*cond_factor)))^-1;
+                        obj.Links{ii}.conductance/cond_factor) +...
+                        ((obj.Links{ii}.pore2Length / obj.Nodes{node2Index}.conductance/cond_factor)))^-1;
                     
                     Factor(node2Index, node2Index) = Factor(node2Index, node2Index) + nodeLinkSystemConductance;
                     B(node2Index) = nodeLinkSystemConductance * inletPressure;
@@ -271,17 +300,17 @@ classdef Network < handle & Fluids
                 % if the link is connected to outlet (index of node 2 is 0 which does not exist)
                 elseif obj.Links{ii}.isOutlet
                      nodeLinkSystemConductance = ( (obj.Links{ii}.linkLength /...
-                        obj.Links{ii}.conductance*cond_factor) +...
-                        ((obj.Links{ii}.pore1Length / obj.Nodes{node1Index}.conductance*cond_factor)))^-1;
+                        obj.Links{ii}.conductance/cond_factor) +...
+                        ((obj.Links{ii}.pore1Length / obj.Nodes{node1Index}.conductance/cond_factor)))^-1;
                     Factor(node1Index, node1Index) = Factor(node1Index, node1Index) + nodeLinkSystemConductance;
                     B(node1Index) = nodeLinkSystemConductance * outletPressure;
                     
                 %if the link is neither inlet nor outlet    
                 else
                     nodeLinkSystemConductance = ((obj.Links{ii}.linkLength /...
-                        obj.Links{ii}.conductance*cond_factor) +...
-                        ((obj.Links{ii}.pore1Length / obj.Nodes{node1Index}.conductance*cond_factor) +...
-                        (obj.Links{ii}.pore2Length / obj.Nodes{node2Index}.conductance*cond_factor)))^-1;   
+                        obj.Links{ii}.conductance/cond_factor) +...
+                        ((obj.Links{ii}.pore1Length / obj.Nodes{node1Index}.conductance/cond_factor) +...
+                        (obj.Links{ii}.pore2Length / obj.Nodes{node2Index}.conductance/cond_factor)))^-1;   
                 
                     Factor(node1Index, node1Index) = Factor(node1Index, node1Index) + nodeLinkSystemConductance;
                     Factor(node2Index, node2Index) = Factor(node2Index, node2Index) + nodeLinkSystemConductance;
@@ -378,32 +407,16 @@ classdef Network < handle & Fluids
             % calculate flow rate in Inlet_Links
             for ii = 1:obj.numberOfLinks 
                 
-%                     node2Index = obj.Links{ii}.pore2Index;
-                    node1Index = obj.Links{ii}.pore1Index;
-                if obj.Links{ii}.isInlet 
-                    
-%                     %calculate the conductivity of the linkNode system
-%                     nodeLinkSystemConductance = ((obj.Links{ii}.linkLength /...
-%                         obj.Links{ii}.conductance) +...
-%                         ((obj.Links{ii}.pore2Length / obj.Nodes{node2Index}.conductance)))^-1;
-%                     nodeLinkSystemConductance_o = ((obj.Links{ii}.linkLength /...
-%                         obj.Links{ii}.conductance*cond_factor) +...
-%                         ((obj.Links{ii}.pore2Length / obj.Nodes{node2Index}.conductance)))^-1;
-%                     % calculate the flow rate of the fluid
-%                     obj.totalFlowRate = obj.totalFlowRate + ...
-%                         abs(nodeLinkSystemConductance * ...
-%                         (inletPressure - obj.Nodes{node2Index}.waterPressure)); 
-%                     obj.totalFlowRate_o = obj.totalFlowRate_o + ...
-%                         abs(nodeLinkSystemConductance_o * ...
-%                         (inletPressure - obj.Nodes{node2Index}.oilPressure));
-                elseif obj.Links{ii}.isOutlet
+                node1Index = obj.Links{ii}.pore1Index;
+                
+                if obj.Links{ii}.isOutlet
                     %calculate the conductivity of the linkNode system
                     nodeLinkSystemConductance = ((obj.Links{ii}.linkLength /...
                         obj.Links{ii}.conductance) +...
                         ((obj.Links{ii}.pore1Length / obj.Nodes{node1Index}.conductance)))^-1;
                     nodeLinkSystemConductance_o = ((obj.Links{ii}.linkLength /...
-                        obj.Links{ii}.conductance*cond_factor) +...
-                        ((obj.Links{ii}.pore1Length / obj.Nodes{node1Index}.conductance)))^-1;
+                        obj.Links{ii}.conductance/cond_factor) +...
+                        ((obj.Links{ii}.pore1Length / obj.Nodes{node1Index}.conductance/cond_factor)))^-1;
                     % calculate the flow rate of the fluid
                     obj.totalFlowRate = obj.totalFlowRate + ...
                         abs(nodeLinkSystemConductance * ...
@@ -422,15 +435,8 @@ classdef Network < handle & Fluids
         end
         
         %% AbsolutePermeability
-        function calculateAbsolutePermeability(obj, inletPressure, outletPressure)
-            %AbsolutePermeability calculates the absolute permeability of
-            %the network
-            calculateFlowRate(obj, inletPressure, outletPressure);
-            
-            % for pressure difference in the formula the corresponding
-            % pressure drop between the vertical surfaces should be
-            % calculated (based on Piri B1 formula)
-            
+        function calculateAbsolutePermeability(obj, inletPressure, outletPressure) 
+            calculateFlowRate(obj, inletPressure, outletPressure);                        
             unitConvertor = 1/0.987*10^15; % unit conversion from m2 to miliDarcy
             obj.absolutePermeability = unitConvertor * obj.velocity * obj.xDimension * obj.waterViscosity/ (inletPressure -outletPressure );
         end  
@@ -552,23 +558,15 @@ classdef Network < handle & Fluids
         end   
         
         %% Conductance Calculation 2-Phase Flow and Water Saturation
-        function Sw = calculateConductance_and_Saturation(obj, Pc, Cycle)  
-                 
+        function Sw = calculateConductance_and_Saturation_Drain(obj, Pc)  
+            Pc = abs(Pc);     
             waterVolume = 0;   
             vol = 0;
             waterArea = zeros(obj.numberOfLinks,4);
             
-            for i = 1:obj.numberOfNodes
-                if strcmp(Cycle , 'Drainage')== 1
-                    [obj.Nodes{i}.waterCrossSectionArea, obj.Nodes{i}.waterConductance,...
-                        obj.Nodes{i}.oilCrossSectionArea, obj.Nodes{i}.oilConductance] =...
-                        obj.Nodes{i}.calculateConductance_Drainage(Pc, obj.Pc_drain_max);     
-               
-                else % imbibition 
-                    [obj.Nodes{i}.waterCrossSectionArea, obj.Nodes{i}.waterConductance,...
-                        obj.Nodes{i}.oilCrossSectionArea, obj.Nodes{i}.oilConductance] =...
-                        obj.Nodes{i}.calculateConductance_Imbibition(obj, Pc);                       
-                end                     
+            for i = 1:obj.numberOfNodes 
+                    obj.Nodes{i}.calculateConductance_Drainage(Pc); 
+                    
                 % Water Saturation Calculation
                 waterArea(i,1)=obj.Nodes{i}.area;
                 waterArea(i,2)=obj.Nodes{i}.waterCrossSectionArea;
@@ -578,17 +576,63 @@ classdef Network < handle & Fluids
                     vol = vol + obj.Nodes{i}.volume + obj.Nodes{i}.clayVolume;
                 end
             end
-            for i = 1:obj.numberOfLinks
-                if strcmp(Cycle , 'Drainage')== 1                 
-                   [obj.Links{i}.waterCrossSectionArea, obj.Links{i}.waterConductance,...
-                        obj.Links{i}.oilCrossSectionArea, obj.Links{i}.oilConductance] =...
-                        obj.Links{i}.calculateConductance_Drainage(Pc, obj.Pc_drain_max);     
-                else % imbibition
-                    [obj.Links{i}.waterCrossSectionArea, obj.Links{i}.waterConductance,...
-                        obj.Links{i}.oilCrossSectionArea, obj.Links{i}.oilConductance] =...
-                        obj.Links{i}.calculateConductance_Imbibition(obj, Pc);      
-                    
+            for i = 1:obj.numberOfLinks 
+                    obj.Links{i}.calculateConductance_Drainage(Pc);     
+                 
+                % Water Saturation Calculation                
+                waterArea(i,3)=obj.Links{i}.area;
+                waterArea(i,4)=obj.Links{i}.waterCrossSectionArea;
+                if ~obj.Links{i}.isInlet && ~obj.Links{i}.isOutlet 
+                     waterVolume = waterVolume + (obj.Links{i}.waterCrossSectionArea )...
+                         / obj.Links{i}.area * obj.Links{i}.volume + obj.Links{i}.clayVolume;
+                     vol = vol + obj.Links{i}.volume + obj.Links{i}.clayVolume;
                 end
+            end             
+            Sw = waterVolume / vol;     
+        end
+        function Sw = calculateConductance_and_Saturation_Imb(obj, Pc, NodeL, NodeL_W, LinkL, LinkL_W, cluster_A_nums, cluster_A, cluster_B_nums, cluster_B)  
+            Pc = abs(Pc);     
+            waterVolume = 0;   
+            vol = 0; 
+            waterArea = zeros(obj.numberOfLinks,4);
+            
+            for i = 1:obj.numberOfNodes 
+                    if (any(NodeL(i) == cluster_A_nums(:)) ||  any(NodeL(i) == cluster_B_nums(:)))
+                        obj.Nodes{i}.calculateConductance_Imbibition(obj, Pc);   
+                        
+                    else
+                        if isnan(obj.Nodes{i}.pressureTrapped) && obj.Nodes{i}.occupancy == 'B'
+                            obj.Nodes{i}.pressureTrapped = max(Pc, obj.Nodes{i}.ThresholdPressure_SnapOff);  
+                        end 
+                        if any(obj.Nodes{i}.pressureTrapped) 
+                            obj.Nodes{i}.calculateConductance_Imbibition(obj, obj.Nodes{i}.pressureTrapped); 
+                        elseif (any(NodeL_W(i) == cluster_A(:)) ||  any(NodeL_W(i) == cluster_B(:)))
+                            obj.Nodes{i}.calculateConductance_Imbibition(obj, Pc);
+                        end
+                    end           
+                % Water Saturation Calculation
+                waterArea(i,1)=obj.Nodes{i}.area;
+                waterArea(i,2)=obj.Nodes{i}.waterCrossSectionArea;
+                if ~obj.Nodes{i}.isInlet && ~obj.Nodes{i}.isOutlet 
+                    waterVolume = waterVolume + (obj.Nodes{i}.waterCrossSectionArea )...
+                        / obj.Nodes{i}.area *obj.Nodes{i}.volume + obj.Nodes{i}.clayVolume;                
+                    vol = vol + obj.Nodes{i}.volume + obj.Nodes{i}.clayVolume;
+                end
+            end
+            
+            for i = 1:obj.numberOfLinks 
+                    if (any(LinkL(i) == cluster_A_nums(:)) ||  any(LinkL(i) == cluster_B_nums(:)))
+                        obj.Links{i}.calculateConductance_Imbibition(obj, Pc);    
+                    else
+                        if isnan(obj.Links{i}.pressureTrapped) && obj.Links{i}.occupancy == 'B'
+                            obj.Links{i}.pressureTrapped = max(Pc, obj.Links{i}.ThresholdPressure_SnapOff);    
+                        end 
+                        if any(obj.Links{i}.pressureTrapped) 
+                            obj.Links{i}.calculateConductance_Imbibition(obj, obj.Links{i}.pressureTrapped); 
+                        elseif (any(LinkL_W(i) == cluster_A(:)) ||  any(LinkL_W(i) == cluster_B(:)))
+                            obj.Links{i}.calculateConductance_Imbibition(obj, Pc);
+                        end
+                    end 
                 % Water Saturation Calculation                
                 waterArea(i,3)=obj.Links{i}.area;
                 waterArea(i,4)=obj.Links{i}.waterCrossSectionArea;
@@ -721,7 +765,7 @@ classdef Network < handle & Fluids
         end
           
         %% Relative Permeability_Drain
-        function [krw, kro] = calculateRelativePermeability(obj, inletPressure, LinkL, cluster_A_nums)
+        function [krw, kro] = calculateRelativePermeability(obj, outletPressure, LinkL, LinkL_W, cluster_A_nums, cluster_A)
               
             waterFlowRate = 0;   
             oilFlowRate = 0;
@@ -729,19 +773,22 @@ classdef Network < handle & Fluids
             %search through all the links
             for ii = 1:obj.numberOfLinks 
                   
-                node2Index = obj.Links{ii}.pore2Index;
-                if obj.Links{ii}.isInlet   
+                node1Index = obj.Links{ii}.pore1Index;
+                if obj.Links{ii}.isOutlet   
                      
                         % calculate the flow rate of the fluid
-                        if any(LinkL(ii) == cluster_A_nums(:))  
+%                         if any(LinkL_W(ii) == cluster_A(:))  
                         waterFlowRate = waterFlowRate + ...
-                            abs(obj.Links{ii}.nodeLinkSystemConductance_W * ...
-                            (inletPressure - obj.Nodes{node2Index}.waterPressure));  
-                        end
+                            obj.Links{ii}.nodeLinkSystemConductance_W * ...
+                            (obj.Nodes{node1Index}.waterPressure - outletPressure);  
+%                         end
+                        
+%                         if any(LinkL(ii) == cluster_A_nums(:)) 
                         % calculate the flow rate of the fluid
                         oilFlowRate = oilFlowRate + ...
-                            abs(obj.Links{ii}.nodeLinkSystemConductance_O * ...
-                            (inletPressure - obj.Nodes{node2Index}.oilPressure));  
+                            obj.Links{ii}.nodeLinkSystemConductance_O * ...
+                            (obj.Nodes{node1Index}.oilPressure - outletPressure);  
+%                         end
                 end 
             end                
             krw = waterFlowRate/obj.totalFlowRate;
@@ -769,13 +816,13 @@ classdef Network < handle & Fluids
                 node1Index = obj.Links{ii}.pore1Index;                
                 if obj.Links{ii}.isOutlet  
                         % calculate the flow rate of the fluid
-                        if any(LinkL_W(ii) == cluster_A(:))
+                        if any(LinkL_W(ii) == cluster_A(:))  
                         waterFlowRate = waterFlowRate + ...
                             abs(obj.Links{ii}.nodeLinkSystemConductance_W * ...
                             (outletPressure - obj.Nodes{node1Index}.waterPressure));
                         end
                         % calculate the flow rate of the fluid
-                        if any(LinkL(ii) == cluster_A_nums(:))
+                        if any(LinkL(ii) == cluster_A_nums(:))  
                         oilFlowRate = oilFlowRate + ...
                             abs(obj.Links{ii}.nodeLinkSystemConductance_O * ...
                             (outletPressure - obj.Nodes{node1Index}.oilPressure)); 
@@ -788,7 +835,7 @@ classdef Network < handle & Fluids
                 krw = 1;
             elseif krw <0
                 krw = 0;
-            end
+            end 
             kro = oilFlowRate * obj.oilViscosity/obj.totalFlowRate / obj.waterViscosity;  
             if kro > 1
                 kro = 1;
@@ -802,16 +849,14 @@ classdef Network < handle & Fluids
              %% determining the capillary pressure level interval
              Pc_threshold = zeros(2*obj.numberOfLinks,1);  
              Pc_threshold_n = zeros(obj.numberOfLinks,1); 
-             for i = 1:obj.numberOfLinks                
-                 obj.Links{i}.thresholdPressure = obj.Links{i}.calculateThresholdPressurePistonLike();
-                 Pc_threshold(i) = obj.Links{i}.thresholdPressure;
-             end
-             for i = 1:obj.numberOfNodes                
-                  obj.Nodes{i}.thresholdPressure = obj.Nodes{i}.calculateThresholdPressurePistonLike();
-                  Pc_threshold(i+obj.numberOfLinks) = obj.Nodes{i}.thresholdPressure;
+             for i = 1:obj.numberOfLinks   
+                 obj.Links{i}.calculateThresholdPressurePistonLike();
+                 Pc_threshold(i,1) = obj.Links{i}.thresholdPressure;
              end 
-             
-             % Pc_interval
+             for i = 1:obj.numberOfNodes                
+                  obj.Nodes{i}.calculateThresholdPressurePistonLike();
+                  Pc_threshold(i+obj.numberOfLinks) = obj.Nodes{i}.thresholdPressure; 
+             end  
              max_Pc = max(Pc_threshold); 
              min_Pc = min(nonzeros(Pc_threshold)); 
              Pc_interval = (max_Pc-min_Pc)/10;   
@@ -822,10 +867,12 @@ classdef Network < handle & Fluids
              obj.Pc_drain_max = max_Pc;
              obj.DrainageData = zeros(10,5);
              obj.DrainageData(1,:) = [1, 0, 1, 0, 0]; 
+             LinkL = zeros(obj.numberOfLinks);
+             cluster_A_nums = [];             
+             [~, NodeL_W, LinkL_W,cluster_A,cluster_B] = Clustering_water(obj); 
              
              %% Cycle of increasing Pressure
-             while Pc <= obj.Pc_drain_max    
-             [~, NodeL, LinkL,cluster_A_nums,cluster_B_nums] = Clustering_water(obj);    
+             while Pc <= obj.Pc_drain_max *1.01     
               press = 1;
              deltaV = 0;
              %% Find new inlet-Links with threshold pressure < Pc             
@@ -833,7 +880,7 @@ classdef Network < handle & Fluids
                   node1Index = obj.Links{i}.pore1Index;
                   node2Index = obj.Links{i}.pore2Index;
                   if obj.Links{i}.isInlet && obj.Links{i}.occupancy == 'A'
-                         if (any(LinkL(i) == cluster_A_nums(:)) ||  any(LinkL(i) == cluster_B_nums(:)))
+                         if (any(LinkL_W(i) == cluster_A(:)) ||  any(LinkL_W(i) == cluster_B(:)))
                          Pc_threshold_n(i,1)= Pc_threshold(i);
                          deltaV = deltaV + obj.Links{i}.volume; 
                          end
@@ -844,20 +891,16 @@ classdef Network < handle & Fluids
                            end
                   elseif ~obj.Links{i}.isOutlet && ~obj.Links{i}.isInlet && obj.Links{i}.occupancy == 'A'                    
                       if obj.Nodes{node1Index}.occupancy == 'B' || obj.Nodes{node2Index}.occupancy == 'B'
-                          if (any(LinkL(i) == cluster_A_nums(:)) ||  any(LinkL(i) == cluster_B_nums(:)))
+                          if (any(LinkL_W(i) == cluster_A(:)) ||  any(LinkL_W(i) == cluster_B(:)))
                               Pc_threshold_n(i,1)= Pc_threshold(i); 
                               deltaV = deltaV + obj.Links{i}.volume;  
                           end
                       end  
-                  end
-%                 deltaS = deltaV /obj.poreVolume ;
-%                  if deltaS > 0.05                       
-%                      break;
-%                  end
+                  end 
              end
              deltaS = 0;
              deltaV = 0;  
-             if (any (nonzeros(Pc_threshold_n)) && min(nonzeros(Pc_threshold_n))<= Pc) || Pc == max_Pc
+             if (any(nonzeros(Pc_threshold_n)) && min(nonzeros(Pc_threshold_n))<= Pc) || Pc == max_Pc
                  pressure = 1;
              else
                  pressure = 0;
@@ -877,12 +920,12 @@ classdef Network < handle & Fluids
                  node2Index = obj.Links{i}.pore2Index;
                  
                  if obj.Links{i}.isInlet && obj.Links{i}.occupancy == 'A' &&...
-                                   (any(LinkL(i) == cluster_A_nums(:)) ||  any(LinkL(i) == cluster_B_nums(:)))
+                                   (any(LinkL_W(i) == cluster_A(:)) ||  any(LinkL_W(i) == cluster_B(:)))
                          obj.Links{i}.occupancy = 'B'; 
                          invaded = invaded + 1;
                          deltaV = deltaV + obj.Links{i}.volume ;  
                          if  obj.Nodes{node2Index}.occupancy == 'A' &&obj.Nodes{node2Index}.thresholdPressure <=Pc  &&...
-                                   (any(NodeL(node2Index) == cluster_A_nums(:)) ||  any(NodeL(node2Index) == cluster_B_nums(:)))
+                                   (any(NodeL_W(node2Index) == cluster_A(:)) ||  any(NodeL_W(node2Index) == cluster_B(:)))
                              
                              obj.Nodes{node2Index}.occupancy = 'B'; 
                              invaded = invaded + 1;
@@ -902,14 +945,14 @@ classdef Network < handle & Fluids
                            end
                   elseif ~obj.Links{i}.isOutlet && ~obj.Links{i}.isInlet && obj.Links{i}.occupancy == 'A'                        
                       if obj.Nodes{node1Index}.occupancy == 'B' || obj.Nodes{node2Index}.occupancy == 'B'  &&...
-                              (any(LinkL(i) == cluster_A_nums(:)) ||  any(LinkL(i) == cluster_B_nums(:)))
+                              (any(LinkL_W(i) == cluster_A(:)) ||  any(LinkL_W(i) == cluster_B(:)))
                           
                           obj.Links{i}.occupancy = 'B';
                           invaded = invaded + 1;
                           deltaV = deltaV + obj.Links{i}.volume ;  
                           
                           if  obj.Nodes{node2Index}.occupancy == 'A' && obj.Nodes{node2Index}.thresholdPressure <=Pc  && ...                                  
-                                   (any(NodeL(node2Index) == cluster_A_nums(:)) ||  any(NodeL(node2Index) == cluster_B_nums(:)))
+                                   (any(NodeL_W(node2Index) == cluster_A(:)) ||  any(NodeL_W(node2Index) == cluster_B(:)))
                                
                               obj.Nodes{node2Index}.occupancy = 'B'; 
                               invaded = invaded + 1;
@@ -922,7 +965,7 @@ classdef Network < handle & Fluids
                           end   
                           
                           if obj.Nodes{node1Index}.occupancy == 'A' && obj.Nodes{node1Index}.thresholdPressure <=Pc && ...
-                                   (any(NodeL(node1Index) == cluster_A_nums(:)) ||  any(NodeL(node1Index) == cluster_B_nums(:)))
+                                   (any(NodeL_W(node1Index) == cluster_A(:)) ||  any(NodeL_W(node1Index) == cluster_B(:)))
                                
                               obj.Nodes{node1Index}.occupancy = 'B';
                               deltaV = deltaV + obj.Nodes{node1Index}.volume ; 
@@ -934,8 +977,7 @@ classdef Network < handle & Fluids
                              end
                           end
                       end                      
-                 end 
-                 
+                 end                 
                  deltaS = deltaV /obj.poreVolume ; 
                    if deltaS > 0.1
                      press = 0;
@@ -949,13 +991,21 @@ classdef Network < handle & Fluids
                if Pc == max_Pc
                    lastMaxP = max_Pc;
                end
+               
              % Updating element saturations and conductances
-             Sw = calculateConductance_and_Saturation(obj, lastMaxP, 'Drainage'); 
+             Sw = calculateConductance_and_Saturation_Drain(obj, lastMaxP); 
              pressureDistribution_TwoPhases(obj, inletPressure, outletPressure); 
              
-             % Relative Permeability Calculation 
-             [Krw , Kro] = calculateRelativePermeability (obj, inletPressure, LinkL, cluster_A_nums);            
+             % Relative Permeability Calculation              
+             [Krw , Kro] = calculateRelativePermeability (obj, outletPressure, LinkL, LinkL_W, cluster_A_nums, cluster_A);             
              obj.DrainageData(t,:) = [Sw, lastMaxP, Krw, Kro, invaded]; 
+             
+             if invaded ~= 0                 
+                 [~, ~, LinkL,cluster_A_nums,~] = Clustering(obj);
+                 [~, NodeL_W, LinkL_W,cluster_A,cluster_B] = Clustering_water(obj);
+             else
+                 [~, NodeL_W, LinkL_W,cluster_A,cluster_B] = Clustering_water(obj);
+             end
              
               % Pc Step Calculation 
               if press ~= 0 
@@ -963,30 +1013,32 @@ classdef Network < handle & Fluids
               end
              t = t + 1;     
              end 
-              %% Ploting Pc & Kr
+%              run('CARB_0_0_cycle1_drain.m')
+             %% Ploting Pc & Kr
             S = obj.DrainageData(:,1);
             P = obj.DrainageData(:,2);
             kw = obj.DrainageData(:,3);
-            ko = obj.DrainageData(:,4);   
-            figure('name','Primary Dranage Cappilary Pressure & Relative Permeability Curves',...
+            ko = obj.DrainageData(:,4); 
+            figure('name','Primary Dranage & Secondary Imbibition Cappilary Pressure & Relative Permeability Curves',...
                 'units','normalized','outerposition',[0 0 1 1])
-            subplot(1,2,1);
+            subplot(2,2,[1 3]);
             grid on
-            plot(S,P,'--r')  
+            plot(S,P,'*r')   
+            legend('MatlabPNM','Location','North') 
             title('Drainage & Imbibition Cappilary Pressure Curves')
             xlabel('Sw')
             xlim([0 1])
             ylabel('Pc (Pa)')
-
-            subplot(1,2,2);
-            plot(S,kw,'--r',S,ko,'--b')
+            
+            subplot(2,2,2);
+            plot(S,kw,'-r',S,ko,'-b')      
             title('Drainage Relative Permeability Curves')
             xlabel('Sw')
             xlim([0 1])
             ylabel('Reative Permeability')
             ylim([0 1])
             legend('Water Relative Permeability','Oil Relative Permeability','Location','North') 
-
+             
         end   
         
         %% Clustering
@@ -1027,20 +1079,26 @@ classdef Network < handle & Fluids
             
             % HoshenKopelman Algorithm for clustering
             [NumberOfClusters, NodeL, LinkL] = modifiedHKNonLattice(NodeS, LinkS,NodeNext, LinksOfNode, OFlag);
-            
+            a = 0;
             % Modify number of inlet & outlet Links of Clusters
             for i =1:obj.numberOfLinks
                 if obj.Links{i}.isInlet 
                     if any(obj.Links{i}.oilLayerExist) || obj.Links{i}.occupancy == 'B'
                         if obj.Nodes{obj.Links{i}.pore2Index}.occupancy == 'B' || any(obj.Nodes{obj.Links{i}.pore2Index}.oilLayerExist)
                             LinkL(i,1) = NodeL(obj.Links{i}.pore2Index);
+                        else
+                            a = a + 1;
+                            LinkL(i,1) = max(NodeL)+a;
                         end
                     end
                     
                 elseif obj.Links{i}.isOutlet
                     if (obj.Links{i}.occupancy == 'B' || any(obj.Links{i}.oilLayerExist))
                         if obj.Nodes{obj.Links{i}.pore1Index}.occupancy == 'B' || any(obj.Nodes{obj.Links{i}.pore1Index}.oilLayerExist)
-                            LinkL(i,1) = NodeL(obj.Links{i}.pore1Index);                
+                            LinkL(i,1) = NodeL(obj.Links{i}.pore1Index);  
+                        else
+                            a = a + 1;
+                            LinkL(i,1) = max(NodeL)+a;
                         end
                     end
                 end
@@ -1077,7 +1135,7 @@ classdef Network < handle & Fluids
                     end
                 end
             end
-            cluster_A_nums = nonzeros(A);            
+            cluster_A_nums = nonzeros(A);    
             
             b = 0;
             B = zeros(obj.numberOfLinks,1);
@@ -1091,20 +1149,19 @@ classdef Network < handle & Fluids
                     end
                 end
             end
-            cluster_B_nums = nonzeros(B);
+            cluster_B_nums = nonzeros(B); 
         end     
         function [NumberOfClusters, NodeL, LinkL,cluster_A_nums,cluster_B_nums] = Clustering_water(obj)
             % Arguments of HoshenKopelman function
             NodeS = zeros(obj.numberOfNodes,1);
             LinksOfNode = zeros(obj.numberOfNodes,obj.maxCoordinationNumber);
-            NodeNext = zeros(obj.numberOfNodes,obj.maxCoordinationNumber);
-%             numA = 0;
+            NodeNext = zeros(obj.numberOfNodes,obj.maxCoordinationNumber); 
+            
             for i = 1:obj.numberOfNodes
                 
                 NodeS(i,1) = obj.Nodes{i}.occupancy; % nodes with oil(B),nodes with water(A)
                 if obj.Nodes{i}.shapeFactor <= 1 / 16 % There is water in the corners
-                        NodeS(i,1) = 'A';                              
-%                         numA=1;
+                        NodeS(i,1) = 'A';  
                 end
                 if ~obj.Nodes{i}.isInlet && ~obj.Nodes{i}.isOutlet
                     LinksOfNode(i,1:obj.Nodes{i}.connectionNumber) = obj.Nodes{i}.connectedLinks;
@@ -1130,24 +1187,30 @@ classdef Network < handle & Fluids
                 end
             end            
             OFlag = 'A'; %oil clusters has numbers B:NumberOfClusters %water clusters are A
-            
-%             if numA == 1
+             
             % HoshenKopelman Algorithm for clustering
             [NumberOfClusters, NodeL, LinkL] = modifiedHKNonLattice(NodeS, LinkS,NodeNext, LinksOfNode, OFlag);
             
             % Modify number of inlet & outlet Links of Clusters
+            a = 0;
             for i =1:obj.numberOfLinks
                 if obj.Links{i}.isInlet 
-                    if  obj.Links{i}.occupancy == 'A' || obj.Links{i}.shapeFactor <= 1 / 16
+                    if  obj.Links{i}.occupancy == 'A' || any(obj.Links{i}.waterCornerExist)
                         if obj.Nodes{obj.Links{i}.pore2Index}.occupancy == 'A' || obj.Nodes{obj.Links{i}.pore2Index}.shapeFactor <= 1 / 16
                             LinkL(i,1) = NodeL(obj.Links{i}.pore2Index);
+                        else
+                            a = a + 1;
+                            LinkL(i,1) = max(NodeL)+a;
                         end
                     end
                     
                 elseif obj.Links{i}.isOutlet
-                    if obj.Links{i}.occupancy == 'A' || obj.Links{i}.shapeFactor <= 1 / 16
+                    if obj.Links{i}.occupancy == 'A' || any(obj.Links{i}.waterCornerExist)
                         if obj.Nodes{obj.Links{i}.pore1Index}.occupancy == 'A' || obj.Nodes{obj.Links{i}.pore1Index}.shapeFactor <= 1 / 16
-                            LinkL(i,1) = NodeL(obj.Links{i}.pore1Index);                
+                            LinkL(i,1) = NodeL(obj.Links{i}.pore1Index);    
+                        else
+                            a = a + 1;
+                            LinkL(i,1) = max(NodeL)+a;            
                         end
                     end
                 end
@@ -1198,18 +1261,11 @@ classdef Network < handle & Fluids
                     end
                 end
             end
-            cluster_B_nums = nonzeros(B);
-%             else
-%                  NumberOfClusters =0;     
-%                  NodeL=[];
-%                  LinkL=[];
-%                  cluster_A_nums=[];
-%                  cluster_B_nums=[];
-%             end
+            cluster_B_nums = nonzeros(B); 
         end 
        
         %% Secondary Imbibition 
-        function ScoendaryImbibition_Spon(obj, inletPressure, outletPressure)    
+        function ScoendaryImbibition(obj, inletPressure, outletPressure)    
             
             %counter for invaded elements
             numOfLinks_SnapOff = 0;
@@ -1218,69 +1274,65 @@ classdef Network < handle & Fluids
             numOfNodes_SnapOff = 0;
             numOfNodes_PoreBodyFilling = 0;
             numOfNodes_LayerCollapse = 0;
-            thresholdPressure = zeros(obj.numberOfLinks, 14);               
-             Pc_imb = obj.Pc_drain_max; 
-             
+            obj.thresholdPressure = zeros(obj.numberOfLinks, 14);               
+            Pc_imb = obj.Pc_drain_max; 
+            Pc_min = Pc_imb;
+            
             %% Calculating throat Snap-Off & Pistone-Like displacement & layer collapse            
-            for i = 1:obj.numberOfLinks 
-                obj.Links{i}.recedingContactAngle = 5*pi/18; 
+            for i = 1:obj.numberOfLinks  
                 if obj.Links{i}.occupancy == 'B' % if the throat is oil filled                           
-                    [obj.Links{i}.ThresholdPressure_PistonLike, obj.Links{i}.oilLayerExist] =...
-                        obj.Links{i}.calculateThresholdPressurePistonLike_Imbibition (obj.Pc_drain_max);
-                    obj.Links{i}.ThresholdPressure_SnapOff = ...
-                        obj.Links{i}.calculateThresholdPressureSnapOff (obj.Pc_drain_max); 
-                    obj.Links{i}.ThresholdPressure_LayerCollapse = obj.Links{i}.calculateThresholdPressureLayerCollapse (obj.Pc_drain_max);
+                    obj.Links{i}.calculateThresholdPressurePistonLike_Imbibition (obj.Pc_drain_max);
+                    obj.Links{i}.calculateThresholdPressureSnapOff (obj.Pc_drain_max); 
+                    obj.Links{i}.calculateThresholdPressureLayerCollapse (obj.Pc_drain_max);
                     if obj.Links{i}.isInlet
-                        thresholdPressure(i,1) = -1;
+                        obj.thresholdPressure(i,1) = -1; 
                     elseif obj.Links{i}.isOutlet
-                        thresholdPressure(i,1) = 1;
+                        obj.thresholdPressure(i,1) = 1; 
                     end
-                    thresholdPressure(i,2) = obj.Links{i}.ThresholdPressure_SnapOff; 
-                    thresholdPressure(i,3) = obj.Links{i}.ThresholdPressure_PistonLike;
-                    thresholdPressure(i,4:7) = obj.Links{i}.ThresholdPressure_LayerCollapse;
+                    obj.thresholdPressure(i,2) = obj.Links{i}.ThresholdPressure_PistonLike;
+                    obj.thresholdPressure(i,3) = obj.Links{i}.ThresholdPressure_SnapOff; 
+                    obj.thresholdPressure(i,4:7) = obj.Links{i}.ThresholdPressure_LayerCollapse;
                 end
             end
             
             %% Calculating Pore Snap-Off & Pore-Body Filling displacement & layer collapse            
-            for i = 1:obj.numberOfNodes                 
-                obj.Nodes{i}.recedingContactAngle = 5*pi/18;
-                if obj.Nodes{i}.occupancy == 'B' % if the throat is oil filled
-                    
-                    obj.Nodes{i}.ThresholdPressure_SnapOff = ...
-                        obj.Nodes{i}.calculateThresholdPressureSnapOff (obj.Pc_drain_max); 
-                    [obj.Nodes{i}.ThresholdPressure_PoreBodyFilling, obj.Nodes{i}.oilLayerExist] = ...
-                        obj.Nodes{i}.calculateThresholdPressurePoreBodyFilling (obj);                    
-                    obj.Nodes{i}.ThresholdPressure_LayerCollapse = obj.Nodes{i}.calculateThresholdPressureLayerCollapse (obj.Pc_drain_max);
+            for i = 1:obj.numberOfNodes                  
+                if obj.Nodes{i}.occupancy == 'B' % if the throat is oil filled      
+                    obj.Nodes{i}.calculateThresholdPressurePoreBodyFilling (obj);  
+                    obj.Nodes{i}.calculateThresholdPressurePistonLike_Imbibition (obj.Pc_drain_max);
+                    obj.Nodes{i}.calculateThresholdPressureSnapOff (obj.Pc_drain_max);  
+                    obj.Nodes{i}.calculateThresholdPressureLayerCollapse (obj.Pc_drain_max);
                     if obj.Nodes{i}.isInlet
-                        thresholdPressure(i,8) = -1;
+                        obj.thresholdPressure(i,8) = -1;
                     elseif obj.Nodes{i}.isOutlet
-                        thresholdPressure(i,8) = 1;
+                        obj.thresholdPressure(i,8) = 1;
                     end
-                    thresholdPressure(i,9) = obj.Nodes{i}.ThresholdPressure_SnapOff;
-                    thresholdPressure(i,10) = obj.Nodes{i}.ThresholdPressure_PoreBodyFilling;                    
-                    thresholdPressure(i,11:14) = obj.Nodes{i}.ThresholdPressure_LayerCollapse;
+                    obj.thresholdPressure(i,9) = obj.Nodes{i}.ThresholdPressure_PoreBodyFilling;   
+                    obj.thresholdPressure(i,10) = obj.Nodes{i}.ThresholdPressure_SnapOff;                 
+                    obj.thresholdPressure(i,11:14) = obj.Nodes{i}.ThresholdPressure_LayerCollapse;
                 end  
-            end  
+            end               
              
-             poreVolumeInjected = 0;
-             PVInjected = 0;
-             Pc_interval = Pc_imb /1000; 
+             Pc_interval = Pc_imb /100; 
              t = 1;       
-             obj.ImbibitionData = zeros(100,11);
+             obj.ImbibitionData = zeros(100,12);
              obj.ImbibitionData(1,:) = ...
-                 [obj.DrainageData(end,1),obj.Pc_drain_max,obj.DrainageData(end,3),obj.DrainageData(end,4),0,0,0,0,0,0,0];
-             
-             percList = -100000*ones(2*obj.numberOfNodes+2*obj.numberOfLinks,4);
+                 [obj.DrainageData(end,1),obj.Pc_drain_max,obj.DrainageData(end,3),obj.DrainageData(end,4),0,0,0,0,0,0,0,Pc_imb];
+             invaded_Element = zeros(2*(obj.numberOfLinks+obj.numberOfNodes), 11); 
+             e = 0;
+             obj.sequence = zeros(2*obj.numberOfLinks, 11); 
+             percList = -1000000*ones(obj.numberOfNodes+obj.numberOfLinks,1);
+            poreVolumeInjected = 0;
+            PVInjected = 0;
+            [~, NodeL, LinkL, cluster_A_nums, cluster_B_nums] = Clustering(obj); 
+            inv = false;
+            while (~isempty(cluster_A_nums) || ~isempty(cluster_B_nums)) && Pc_imb >-99999  
+                   
+            press = 1; 
+            deltaS = 0;  
             
-            [~,~, ~, cluster_A_nums, cluster_B_nums] = Clustering(obj);  
-             
-            while (~isempty(cluster_A_nums) || ~isempty(cluster_B_nums)) && Pc_imb > -99999
-
-             [~, NodeL, LinkL,cluster_A_nums,cluster_B_nums] = Clustering(obj);             
-             [~, NodeL_W, LinkL_W,cluster_A,cluster_B] = Clustering_water(obj);
-             %% Percolation List           
-                a = 1; 
-                for i = 1:obj.numberOfLinks         
+            %% Invasion & Percolation List   
+            for i = 1:obj.numberOfLinks         
                     
                     node1Index = obj.Links{i}.pore1Index;
                     node2Index = obj.Links{i}.pore2Index;
@@ -1289,342 +1341,413 @@ classdef Network < handle & Fluids
                         
                          if obj.Links{i}.isInlet            
                              
-                             if any(obj.Links{i}.ThresholdPressure_PistonLike)&& obj.Links{i}.ThresholdPressure_PistonLike<= Pc_imb
+                             if any(obj.Links{i}.ThresholdPressure_PistonLike)
                                 
-                                percList(a,1) = i;
-                                percList(a,2) = 2;
-                                percList(a,3) = 2;
-                                percList(a,4) = obj.Links{i}.ThresholdPressure_PistonLike ;
-                                a = a + 1;
+                                percList(i) = obj.Links{i}.ThresholdPressure_PistonLike ;
                              end
-                            
                          elseif obj.Links{i}.isOutlet
                              
-                             if (any(NodeL_W(node1Index) == cluster_A(:)) || any(NodeL_W(node1Index) == cluster_B(:))) && ...
-                                     any(obj.Links{i}.ThresholdPressure_PistonLike)&& ...
-                                     obj.Links{i}.ThresholdPressure_PistonLike<= Pc_imb && obj.Nodes{node1Index}.occupancy == 'A'
+                             if  obj.Nodes{node1Index}.occupancy == 'A' && any(obj.Links{i}.ThresholdPressure_PistonLike)
                                  
-                                     percList(a,1) = i;
-                                     percList(a,2) = 2;
-                                     percList(a,3) = 2;
-                                     percList(a,4) = obj.Links{i}.ThresholdPressure_PistonLike ;
-                                     a = a + 1;
-                             elseif  any(obj.Links{i}.ThresholdPressure_SnapOff) ... % if the throat is non circular
-                                     && obj.Links{i}.ThresholdPressure_SnapOff<= Pc_imb 
-                                     percList(a,1) = i;
-                                     percList(a,2) = 2;
-                                     percList(a,3) = 1;
-                                     percList(a,4) = obj.Links{i}.ThresholdPressure_SnapOff;
-                                     a = a + 1;
-                             end        
-                            
+                                     percList(i) = obj.Links{i}.ThresholdPressure_PistonLike ;
+                             elseif  obj.Nodes{node1Index}.occupancy == 'B' && ...
+                                     any(obj.Links{i}.ThresholdPressure_SnapOff) % if the throat is non circular
+                                 
+                                     percList(i) = obj.Links{i}.ThresholdPressure_SnapOff;
+                             end                                                           
                          else
-                             if  ((any(NodeL_W(node1Index) == cluster_A(:)) || any(NodeL_W(node1Index) == cluster_B(:))) ||...
-                                 (any(NodeL_W(node2Index) == cluster_A(:)) || any(NodeL_W(node2Index) == cluster_B(:))) ) && ...
-                                 (obj.Nodes{node1Index}.occupancy == 'A' || obj.Nodes{node2Index}.occupancy == 'A') && ...
-                                     any(obj.Links{i}.ThresholdPressure_PistonLike) && obj.Links{i}.ThresholdPressure_PistonLike<= Pc_imb
+                             if  (obj.Nodes{node1Index}.occupancy == 'A' && obj.Nodes{node2Index}.occupancy == 'B') || ... 
+                                     (obj.Nodes{node1Index}.occupancy == 'B' && obj.Nodes{node2Index}.occupancy == 'A') && ...
+                                     any(obj.Links{i}.ThresholdPressure_PistonLike)
+                                 
                                      
-                                     percList(a,1) = i;
-                                     percList(a,2) = 2;
-                                     percList(a,3) = 2;
-                                     percList(a,4) = obj.Links{i}.ThresholdPressure_PistonLike ;
-                                     a = a + 1;
-                             elseif any(obj.Links{i}.ThresholdPressure_SnapOff)...% if the throat is non circular
-                                     && obj.Links{i}.ThresholdPressure_SnapOff<= Pc_imb
-                                 percList(a,1) = i;
-                                 percList(a,2) = 2;
-                                 percList(a,3) = 1;
-                                 percList(a,4) = obj.Links{i}.ThresholdPressure_SnapOff;
-                                 a = a + 1;
+                                     percList(i) = obj.Links{i}.ThresholdPressure_PistonLike ;
+                                     
+                             elseif obj.Nodes{node1Index}.occupancy == 'B' &&...
+                                     obj.Nodes{node2Index}.occupancy == 'B' &&...
+                                     any(obj.Links{i}.ThresholdPressure_SnapOff)% if the throat is non circular
+                                 
+                                 percList(i) = obj.Links{i}.ThresholdPressure_SnapOff;
                              end
                          end
                     end
-                end
-                for i = 1:obj.numberOfNodes
-                    
+            end
+            a = obj.numberOfLinks;
+            for i = 1:obj.numberOfNodes
                     if (any(NodeL(i) == cluster_A_nums(:)) || any(NodeL(i) == cluster_B_nums(:)))  
                         
                         filledThroats = 0;
-                        T = 0;
                         for j = 1:obj.Nodes{i}.connectionNumber                            
                             if (obj.Links{obj.Nodes{i}.connectedLinks(j)}.occupancy == 'A')                                 
                                 filledThroats = filledThroats + 1;
-                                if (any(LinkL_W(obj.Nodes{i}.connectedLinks(j))) == cluster_A(:)) ||...
-                                        (any(LinkL_W(obj.Nodes{i}.connectedLinks(j))) == cluster_B(:))
-                                    T = 1;
-                                end
                             end
                         end                                         
                         
-                        if filledThroats ~= 0 
+                        if filledThroats ~= 0 &&  any(obj.Nodes{i}.ThresholdPressure_PoreBodyFilling)
                             
-                            [obj.Nodes{i}.ThresholdPressure_PoreBodyFilling, obj.Nodes{i}.oilLayerExist] = ...
-                                obj.Nodes{i}.calculateThresholdPressurePoreBodyFilling (obj); 
-                            if any(obj.Nodes{i}.ThresholdPressure_PoreBodyFilling) && ...
-                                obj.Nodes{i}.ThresholdPressure_PoreBodyFilling <= Pc_imb && T == 1
-                         
-                                percList(a,1) = i;
-                                percList(a,2) = 1;
-                                percList(a,3) = 2;
-                                percList(a,4) = obj.Nodes{i}.ThresholdPressure_PoreBodyFilling; % pore body filling threshold pressure
-                                a = a + 1;
-                            end
-                        elseif any(obj.Nodes{i}.ThresholdPressure_SnapOff)...% if the node is non circular
-                                && obj.Nodes{i}.ThresholdPressure_PoreBodyFilling <= Pc_imb 
+                            percList(a+i) = obj.Nodes{i}.ThresholdPressure_PoreBodyFilling;  
                             
-                            percList(a,1) = i;
-                            percList(a,2) = 1;
-                            percList(a,3) = 1;
-                            percList(a,4) = obj.Nodes{i}.ThresholdPressure_SnapOff; % snap off threshold pressure
-                            a = a + 1;
+                        elseif filledThroats == 0 && any(obj.Nodes{i}.ThresholdPressure_SnapOff)% if the node is non circular
+                            
+                            percList(a+i) = obj.Nodes{i}.ThresholdPressure_SnapOff; % snap off threshold pressure
                         end
                         
                     end
+            end 
+            
+                   
+            %% Percolation Section                                     
+            if (max(percList)) >= Pc_imb  
+                pressure = 1;
+            else
+                pressure = 0;
+            end
+            
+            while pressure == 1 && (max(percList)) > Pc_imb  && deltaS <= 0.1
+                
+                inv = true; 
+                % Descending sorting of threshold pressures
+                [PcTh, ix] = max(percList(1:end));
+                if PcTh ~= -1000000  
+                indexElement = ix(1);    
+                if Pc_min > percList(indexElement)
+                    Pc_min = percList(indexElement);
                 end
                 
-                percList = sortrows(percList,-4);
-                if Pc_imb > percList(1,4) && percList(1,4) ~= -100000
-                    Pc_imb = percList(1,4);
-                end
-                t = t+1; 
-                new =a;
-                %% Percolation Section                
-                while (~isempty(cluster_A_nums) || ~isempty(cluster_B_nums))  && Pc_imb >-99999 && new > 0
-                    
-                    % Descending sorting of threshold pressures
-                    percList = sortrows(percList,-4);                      
-                    new = new - 1;         
-                     
-                        %% if the first element is a throat
-                        if percList(1,2) == 2 
-                            
-                            linkIndex = percList(1,1);
-                            node1Index = obj.Links{linkIndex}.pore1Index;
-                            node2Index = obj.Links{linkIndex}.pore2Index;
-                             
-                            if any(LinkL(linkIndex) == cluster_A_nums(:)) || any(LinkL(linkIndex) == cluster_B_nums(:))
-                                
-                                if percList(1,3) == 2                                                 
-                                    
-                                    if obj.Links{linkIndex}.isInlet 
-                                          
-                                        obj.Links{linkIndex}.occupancy = 'A';  
-                                        
-                                        poreVolumeInjected = poreVolumeInjected + obj.Links{linkIndex}.volume; 
-                                        numOfLinks_PistoneLike = numOfLinks_PistoneLike + 1;  
-                                        obj.Links{linkIndex}.isInvaded = true;
-                                        
-                                         if  obj.Nodes{node2Index}.occupancy == 'B'
-                                            
-                                            % Updating pore body filling of the pore
-                                            [obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node2Index}.oilLayerExist] = ...
-                                                obj.Nodes{node2Index}.calculateThresholdPressurePoreBodyFilling (obj);
-                                            if any(obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling) && ...
-                                                    Pc_imb <= obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling   
-                                                new = new+1;
-                                                percList(end-new,:) = [node2Index, 1, 2, obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling];
-                                            end
-                                        end
-                                        
-                                    elseif obj.Links{linkIndex}.isOutlet
-                                        
-                                        if  obj.Nodes{node1Index}.occupancy == 'A' 
-                                            
-                                            obj.Links{linkIndex}.occupancy = 'A';   
-                                            
-                                            poreVolumeInjected = poreVolumeInjected + obj.Links{linkIndex}.volume; 
-                                            numOfLinks_PistoneLike = numOfLinks_PistoneLike + 1;   
-                                            obj.Links{linkIndex}.isInvaded = true;
-                                            
-                                            if obj.Nodes{node1Index}.occupancy == 'B'
-                                                
-                                                % Updating pore body filling of the pore
-                                                [obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node1Index}.oilLayerExist] = ...
-                                                    obj.Nodes{node1Index}.calculateThresholdPressurePoreBodyFilling (obj);
-                                                                                                
-                                                if any(obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling) && ...
-                                                    Pc_imb <= obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling
-                                                
-                                                    new = new+1;
-                                                    percList(end-new,:) = [node1Index, 1, 2, obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling];  
-                                                end
-                                            end
-                                        end
-                                        
-                                    elseif ~obj.Links{linkIndex}.isOutlet && ~obj.Links{linkIndex}.isInlet
-                                        
-                                        if ((obj.Nodes{node1Index}.occupancy == 'A'  ) ||...
-                                                (obj.Nodes{node2Index}.occupancy == 'A' ))
-                                             
-                                            obj.Links{linkIndex}.occupancy = 'A'; 
-                                                
-                                            poreVolumeInjected = poreVolumeInjected + obj.Links{linkIndex}.volume;
-                                            numOfLinks_PistoneLike = numOfLinks_PistoneLike + 1;
-                                            obj.Links{linkIndex}.isInvaded = true; 
-                                                                                         
-                                            if obj.Nodes{node1Index}.occupancy == 'B'
-                                                
-                                                % Updating pore body filling of the pore
-                                                [obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node1Index}.oilLayerExist] = ...
-                                                    obj.Nodes{node1Index}.calculateThresholdPressurePoreBodyFilling (obj);
-                                                
-                                                if any(obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling) && ...
-                                                    Pc_imb <= obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling
-                                                    
-                                                    new = new+1;
-                                                    percList(end-new,:) = [node1Index, 1, 2, obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling];                                    
-                                                end
-                                            end
-                                            
-                                            if  obj.Nodes{node2Index}.occupancy == 'B'
-                                                
-                                                % Updating pore body filling of the pore
-                                                [obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node2Index}.oilLayerExist] = ...
-                                                    obj.Nodes{node2Index}.calculateThresholdPressurePoreBodyFilling (obj);
-                                                
-                                                if any(obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling) && ...
-                                                    Pc_imb <= obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling 
-                                                    
-                                                    new = new+1;
-                                                    percList(end-new,:) = [node2Index, 1, 2, obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling];
-                                                end
-                                            end
-                                        end
-                                    end
-                                    
-                                elseif percList(1,3)==1
-                                    
-                                    obj.Links{linkIndex}.occupancy = 'A'; 
-                                    
-                                    poreVolumeInjected = poreVolumeInjected + obj.Links{linkIndex}.volume; 
-                                    numOfLinks_SnapOff = numOfLinks_SnapOff + 1;  
-                                    obj.Links{linkIndex}.isInvaded = true; 
-                                                                         
-                                    if obj.Links{linkIndex}.isOutlet  
+                [~, NodeL, LinkL,cluster_A_nums,cluster_B_nums] = Clustering(obj);
+                [~, NodeL_W, LinkL_W,cluster_A,cluster_B] = Clustering_water(obj);
+                
+                %% if the first element is a throat
+                if indexElement <= obj.numberOfLinks 
                                          
-                                        if  obj.Nodes{node1Index}.occupancy == 'B'
-                                            
-                                            % Updating pore body filling of the pore
-                                            [obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node1Index}.oilLayerExist] = ...
-                                                obj.Nodes{node1Index}.calculateThresholdPressurePoreBodyFilling (obj);
-                                            
-                                            if any(obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling) && ...
-                                                    Pc_imb <= obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling                                                
-                                                
-                                                new = new+1;
-                                                percList(end-new,:) = [node1Index, 1, 2, obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling];  
-                                            end
-                                        end
+                    linkIndex = indexElement;
+                    node1Index = obj.Links{linkIndex}.pore1Index;                    
+                    node2Index = obj.Links{linkIndex}.pore2Index; 
+                    if any(LinkL(linkIndex) == cluster_A_nums(:)) || any(LinkL(linkIndex) == cluster_B_nums(:)) 
+                        
+                        if obj.Links{linkIndex}.isInlet 
+                            
+                            if obj.Links{linkIndex}.ThresholdPressure_PistonLike >= Pc_imb 
+                                
+                                obj.Links{linkIndex}.occupancy = 'A';  
+                                
+                                poreVolumeInjected = poreVolumeInjected + obj.Links{linkIndex}.volume; 
+                                numOfLinks_PistoneLike = numOfLinks_PistoneLike + 1;  
+                                obj.Links{linkIndex}.isInvaded = true;
+                                e = e+1;
+                                invaded_Element(e,1:4) = [linkIndex, percList(linkIndex), ...
+                                    obj.Links{linkIndex}.ThresholdPressure_PistonLike, obj.Links{linkIndex}.ThresholdPressure_SnapOff]; 
+                                
+                                if  obj.Nodes{node2Index}.occupancy == 'B'
+                                    % Updating pore body filling of the pore
+                                    obj.Nodes{node2Index}.calculateThresholdPressurePoreBodyFilling (obj);
+                                    if any(obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling) && ...
+                                            Pc_imb <= obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling    
+                                        obj.Nodes{node2Index}.occupancy = 'A';
                                         
-                                    elseif ~obj.Links{linkIndex}.isOutlet && ~obj.Links{linkIndex}.isInlet
+                                        poreVolumeInjected = poreVolumeInjected + obj.Nodes{node2Index}.volume; 
+                                        numOfNodes_PoreBodyFilling = numOfNodes_PoreBodyFilling + 1;  
+                                        obj.Nodes{node2Index}.isInvaded = true;
+                                        e = e+1;
+                                        invaded_Element(e,5:8) = [node2Index, obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling, ...
+                                            obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node2Index}.ThresholdPressure_SnapOff]; 
+                                        percList(obj.numberOfLinks+node2Index) = -1000000;
                                         
-                                        if obj.Nodes{node1Index}.occupancy == 'B'
-                                                                                    
-                                            % Updating pore body filling of the pore
-                                            [obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node1Index}.oilLayerExist] = ...
-                                                obj.Nodes{node1Index}.calculateThresholdPressurePoreBodyFilling (obj);
-                                                                                    
-                                            if any(obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling) && ...
-                                                    Pc_imb <= obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling
-                                                
-                                                new = new+1;                                          
-                                                percList(end-new,:) = [node1Index, 1, 2, obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling];                                    
-                                            end
-                                        end
-                                        
-                                        if obj.Nodes{node2Index}.occupancy == 'B'
-                                            
-                                            % Updating pore body filling of the pore
-                                            [obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node2Index}.oilLayerExist] = ...
-                                                obj.Nodes{node2Index}.calculateThresholdPressurePoreBodyFilling (obj);
-                                            
-                                            if any(obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling) && ...
-                                                    Pc_imb <= obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling
-                                                
-                                                new = new+1;
-                                                percList(end-new,:) = [node2Index, 1, 2, obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling];
+                                        for j=1:obj.Nodes{node2Index}.connectionNumber
+                                            if obj.Nodes{node2Index}.connectedLinks(j)~=linkIndex
+                                                percList(obj.Nodes{node2Index}.connectedLinks(j))=...
+                                                    obj.Links{obj.Nodes{node2Index}.connectedLinks(j)}.ThresholdPressure_PistonLike;
                                             end
                                         end
                                     end
                                 end
                             end
                             
-                        %% if the first element is a pore
-                        elseif percList(1,2) == 1 
-                            
-                            nodeIndex = percList(1,1);
-                            
-                            if any(NodeL(nodeIndex) == cluster_A_nums(:)) || any(NodeL(nodeIndex) == cluster_B_nums(:))
+                        elseif obj.Links{linkIndex}.isOutlet
+                            if obj.Links{linkIndex}.ThresholdPressure_PistonLike >= Pc_imb && obj.Nodes{node1Index}.occupancy == 'A' 
                                 
-                                if percList(1,3) == 2  
-                                      
-                                    obj.Nodes{nodeIndex}.occupancy = 'A'; % make the pore water type 
+                                obj.Links{linkIndex}.occupancy = 'A';  
+                                
+                                poreVolumeInjected = poreVolumeInjected + obj.Links{linkIndex}.volume; 
+                                numOfLinks_PistoneLike = numOfLinks_PistoneLike + 1;  
+                                obj.Links{linkIndex}.isInvaded = true;
+                                e = e+1;                                
+                                invaded_Element(e,1:4) = [linkIndex, percList(linkIndex), ...
+                                    obj.Links{linkIndex}.ThresholdPressure_PistonLike, obj.Links{linkIndex}.ThresholdPressure_SnapOff];
+                                
+                            elseif obj.Links{linkIndex}.ThresholdPressure_SnapOff >= Pc_imb && obj.Nodes{node1Index}.occupancy == 'B'
+                                
+                                obj.Links{linkIndex}.occupancy = 'A';   
+                                numOfLinks_SnapOff = numOfLinks_SnapOff + 1;
+                                poreVolumeInjected = poreVolumeInjected + obj.Links{linkIndex}.volume;  
+                                obj.Links{linkIndex}.isInvaded = true;
+                                e = e+1;                                
+                                invaded_Element(e,1:4) = [linkIndex, percList(linkIndex), ...
+                                    obj.Links{linkIndex}.ThresholdPressure_PistonLike, obj.Links{linkIndex}.ThresholdPressure_SnapOff];
+                                percList(obj.numberOfLinks+node1Index) = -1000000;
+                                
+                                % Updating pore body filling of the pore
+                                obj.Nodes{node1Index}.calculateThresholdPressurePoreBodyFilling (obj);
+                                if any(obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling) && ...
+                                        Pc_imb <= obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling    
                                     
-                                    poreVolumeInjected = poreVolumeInjected + obj.Nodes{nodeIndex}.volume;
-                                    numOfNodes_PoreBodyFilling = numOfNodes_PoreBodyFilling + 1;   
-                                    obj.Nodes{nodeIndex}.isInvaded = true; 
+                                    percList(obj.numberOfLinks+node1Index) = obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling;
+                                end
+                            end
+                            
+                        elseif ~obj.Links{linkIndex}.isOutlet && ~obj.Links{linkIndex}.isInlet
+                            
+                            if obj.Nodes{node1Index}.occupancy == 'A' || obj.Nodes{node2Index}.occupancy == 'A' 
+                                if obj.Links{linkIndex}.ThresholdPressure_PistonLike >= Pc_imb 
                                     
-                                    for ii = 1:obj.Nodes{nodeIndex}.connectionNumber 
-                                        
-                                        connectedLink = obj.Nodes{nodeIndex}.connectedLinks(ii);
-                                        
-                                        if obj.Links{connectedLink}.occupancy == 'B'&& ...
-                                                (any(obj.Links{connectedLink}.ThresholdPressure_PistonLike)) && ...
-                                                obj.Links{connectedLink}.ThresholdPressure_PistonLike >= Pc_imb
-                                                
-                                            new = new +1;
-                                            percList(end-new,:) = [connectedLink, 2 ,2 , obj.Links{connectedLink}.ThresholdPressure_PistonLike];
-                                        end
-                                    end
-                                elseif percList(1,3) == 1
+                                    obj.Links{linkIndex}.occupancy = 'A';  
+                                    poreVolumeInjected = poreVolumeInjected + obj.Links{linkIndex}.volume; 
+                                    numOfLinks_PistoneLike = numOfLinks_PistoneLike + 1;  
+                                    obj.Links{linkIndex}.isInvaded = true;
+                                    e = e+1;
+                                    invaded_Element(e,1:4) = [linkIndex, percList(linkIndex), ...
+                                        obj.Links{linkIndex}.ThresholdPressure_PistonLike, obj.Links{linkIndex}.ThresholdPressure_SnapOff];
                                     
-                                    obj.Nodes{nodeIndex}.occupancy = 'A';
-                                    
-                                    obj.Nodes{nodeIndex}.oilLayerExist = nan;
-                                    poreVolumeInjected = poreVolumeInjected + obj.Nodes{nodeIndex}.volume;                                                   
-                                    numOfNodes_SnapOff = numOfNodes_SnapOff + 1;  
-                                    obj.Nodes{nodeIndex}.isInvaded = true; 
-                                                                                                                                            
-                                    for ii = 1:obj.Nodes{nodeIndex}.connectionNumber                                  
-                                        
-                                        connectedLink = obj.Nodes{nodeIndex}.connectedLinks(ii);
-                                        
-                                        if obj.Links{connectedLink}.occupancy == 'B' && ...
-                                                (any(obj.Links{connectedLink}.ThresholdPressure_PistonLike)) && ...
-                                                obj.Links{connectedLink}.ThresholdPressure_PistonLike >= Pc_imb
+                                    if obj.Nodes{node1Index}.occupancy == 'B' 
+                                                                                
+                                        % Updating pore body filling of the pore
+                                        obj.Nodes{node1Index}.calculateThresholdPressurePoreBodyFilling (obj);
+                                        if any(obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling) && ...
+                                                Pc_imb <= obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling 
                                             
-                                            new = new +1;
-                                            percList(end-new,:) = [connectedLink, 2 ,2 , obj.Links{connectedLink}.ThresholdPressure_PistonLike];
+                                            obj.Nodes{node1Index}.occupancy = 'A'; 
+                                            poreVolumeInjected = poreVolumeInjected + obj.Nodes{node1Index}.volume; 
+                                            numOfNodes_PoreBodyFilling = numOfNodes_PoreBodyFilling + 1;  
+                                            obj.Nodes{node1Index}.isInvaded = true;
+                                            e = e+1;
+                                            invaded_Element(e,5:8) = [node1Index, obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling, ...
+                                                obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node1Index}.ThresholdPressure_SnapOff]; 
+                                            
+                                            for j=1:obj.Nodes{node1Index}.connectionNumber
+                                                if obj.Nodes{node1Index}.connectedLinks(j)~=linkIndex
+                                                    percList(obj.Nodes{node1Index}.connectedLinks(j))=...
+                                                        obj.Links{obj.Nodes{node1Index}.connectedLinks(j)}.ThresholdPressure_PistonLike;
+                                                end
+                                            end
+                                        end
+                                        percList(obj.numberOfLinks+node1Index) = -1000000;
+                                    end
+                                    if  obj.Nodes{node2Index}.occupancy == 'B'
+                                        
+                                        % Updating pore body filling of the pore
+                                        obj.Nodes{node2Index}.calculateThresholdPressurePoreBodyFilling (obj);
+                                        if any(obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling) && ...
+                                                Pc_imb <= obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling     
+                                            
+                                            obj.Nodes{node2Index}.occupancy = 'A'; 
+                                            poreVolumeInjected = poreVolumeInjected + obj.Nodes{node2Index}.volume; 
+                                            numOfNodes_PoreBodyFilling = numOfNodes_PoreBodyFilling + 1;  
+                                            obj.Nodes{node2Index}.isInvaded = true;
+                                            e = e+1;
+                                            invaded_Element(e,5:8) = [node2Index, obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling, ...
+                                                obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node2Index}.ThresholdPressure_SnapOff]; 
+                                            
+                                            for j=1:obj.Nodes{node2Index}.connectionNumber
+                                                if obj.Nodes{node2Index}.connectedLinks(j)~=linkIndex
+                                                    percList(obj.Nodes{node2Index}.connectedLinks(j))=...
+                                                        obj.Links{obj.Nodes{node2Index}.connectedLinks(j)}.ThresholdPressure_PistonLike;
+                                                end
+                                            end
+                                        end
+                                        percList(obj.numberOfLinks+node2Index) = -1000000;                                        
+                                    end
+                                end
+                            elseif obj.Links{linkIndex}.ThresholdPressure_SnapOff >= Pc_imb
+                                
+                                obj.Links{linkIndex}.occupancy = 'A';  
+                                numOfLinks_SnapOff = numOfLinks_SnapOff + 1;
+                                
+                                % Updating pore body filling of the pore
+                                obj.Nodes{node1Index}.calculateThresholdPressurePoreBodyFilling (obj);
+                                if any(obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling) && ...
+                                        Pc_imb <= obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling 
+                                    
+                                    obj.Nodes{node1Index}.occupancy = 'A';   
+                                    poreVolumeInjected = poreVolumeInjected + obj.Nodes{node1Index}.volume; 
+                                    numOfNodes_PoreBodyFilling = numOfNodes_PoreBodyFilling + 1;  
+                                    obj.Nodes{node1Index}.isInvaded = true;
+                                    e = e+1;
+                                    invaded_Element(e,5:8) = [node1Index,obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling, ...
+                                        obj.Nodes{node1Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node1Index}.ThresholdPressure_SnapOff]; 
+                                    
+                                    for j=1:obj.Nodes{node1Index}.connectionNumber
+                                        if obj.Nodes{node1Index}.connectedLinks(j)~=linkIndex
+                                            percList(obj.Nodes{node1Index}.connectedLinks(j))=...
+                                                obj.Links{obj.Nodes{node1Index}.connectedLinks(j)}.ThresholdPressure_PistonLike;
                                         end
                                     end
                                 end
+                                
+                                % Updating pore body filling of the pore
+                                obj.Nodes{node2Index}.calculateThresholdPressurePoreBodyFilling (obj);
+                                if any(obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling) && ...
+                                        Pc_imb <= obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling 
+                                    
+                                    obj.Nodes{node2Index}.occupancy = 'A';  
+                                    poreVolumeInjected = poreVolumeInjected + obj.Nodes{node2Index}.volume; 
+                                    numOfNodes_PoreBodyFilling = numOfNodes_PoreBodyFilling + 1;  
+                                    obj.Nodes{node2Index}.isInvaded = true; 
+                                    e = e+1;
+                                    invaded_Element(e,5:8) = [node2Index, obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling, ...
+                                        obj.Nodes{node2Index}.ThresholdPressure_PoreBodyFilling, obj.Nodes{node2Index}.ThresholdPressure_SnapOff]; 
+                                    
+                                    for j=1:obj.Nodes{node2Index}.connectionNumber
+                                        if obj.Nodes{node2Index}.connectedLinks(j)~=linkIndex
+                                            percList(obj.Nodes{node2Index}.connectedLinks(j))=...
+                                                obj.Links{obj.Nodes{node2Index}.connectedLinks(j)}.ThresholdPressure_PistonLike;
+                                        end
+                                    end
+                                end                                
+                                percList(obj.numberOfLinks+node1Index) = -1000000;
+                                percList(obj.numberOfLinks+node2Index) = -1000000;
+                            end
+                        end
+                    end
+                    
+                    %% if the first element is a pore
+                else
+                    nodeIndex = indexElement-obj.numberOfLinks; 
+                    if any(NodeL(nodeIndex) == cluster_A_nums(:)) || any(NodeL(nodeIndex) == cluster_B_nums(:))
+                        
+                        filledThroats = 0;
+                        for j = 1:obj.Nodes{nodeIndex}.connectionNumber    
+                            
+                            if obj.Links{obj.Nodes{nodeIndex}.connectedLinks(j)}.occupancy == 'A' 
+                                
+                                filledThroats = filledThroats + 1;
                             end
                         end
                         
-                        percList(1,:) = -100000;    
-                        [~, NodeL, LinkL,cluster_A_nums,cluster_B_nums] = Clustering(obj);  
+                        if filledThroats ~= 0 &&  any(obj.Nodes{nodeIndex}.ThresholdPressure_PoreBodyFilling) && ...
+                                obj.Nodes{nodeIndex}.ThresholdPressure_PoreBodyFilling >= Pc_imb
+                            
+                            obj.Nodes{nodeIndex}.occupancy = 'A'; % make the pore water type
+                            poreVolumeInjected = poreVolumeInjected + obj.Nodes{nodeIndex}.volume; 
+                            numOfNodes_PoreBodyFilling = numOfNodes_PoreBodyFilling + 1;  
+                            obj.Nodes{nodeIndex}.isInvaded = true;
+                            e = e+1;
+                            invaded_Element(e,5:8) = [nodeIndex, percList(obj.numberOfLinks+nodeIndex), ...
+                                obj.Nodes{nodeIndex}.ThresholdPressure_PoreBodyFilling, obj.Nodes{nodeIndex}.ThresholdPressure_SnapOff]; 
+                            
+                            for j=1:obj.Nodes{nodeIndex}.connectionNumber
+                                percList(obj.Nodes{nodeIndex}.connectedLinks(j)) = -1000000;
+                                if obj.Links{obj.Nodes{nodeIndex}.connectedLinks(j)}.occupancy == 'B'
+                                    percList(obj.Nodes{nodeIndex}.connectedLinks(j))=...
+                                        obj.Links{obj.Nodes{nodeIndex}.connectedLinks(j)}.ThresholdPressure_PistonLike;
+                                end
+                            end
+                            
+                        elseif filledThroats == 0 && any(obj.Nodes{nodeIndex}.ThresholdPressure_SnapOff) && ...% if the node is non circular
+                                obj.Nodes{nodeIndex}.ThresholdPressure_SnapOff >= Pc_imb
+                            
+                            obj.Nodes{nodeIndex}.occupancy = 'A'; % make the pore water type 
+                            poreVolumeInjected = poreVolumeInjected + obj.Nodes{nodeIndex}.volume; 
+                            numOfNodes_SnapOff = numOfNodes_SnapOff + 1;  
+                            obj.Nodes{nodeIndex}.isInvaded = true;
+                            e = e+1;
+                            invaded_Element(e,5:8) = [nodeIndex, percList(obj.numberOfLinks+nodeIndex), ...
+                                obj.Nodes{nodeIndex}.ThresholdPressure_PoreBodyFilling, obj.Nodes{nodeIndex}.ThresholdPressure_SnapOff]; 
+                            
+                            for j=1:obj.Nodes{nodeIndex}.connectionNumber
+                                percList(obj.Nodes{nodeIndex}.connectedLinks(j)) = -1000000;
+                                if obj.Links{obj.Nodes{nodeIndex}.connectedLinks(j)}.occupancy == 'B'
+                                    percList(obj.Nodes{nodeIndex}.connectedLinks(j))=...
+                                        obj.Links{obj.Nodes{nodeIndex}.connectedLinks(j)}.ThresholdPressure_PistonLike;
+                                end
+                            end
+                        end
+                    end
                 end
-                                
-                invaded = numOfLinks_SnapOff + numOfLinks_PistoneLike + ...
-                    numOfNodes_SnapOff + numOfNodes_PoreBodyFilling + numOfNodes_LayerCollapse;
                 
+                percList(indexElement) = -1000000;  
+                deltaS = poreVolumeInjected /obj.poreVolume ; 
+                if deltaS > 0.1
+                    press = 0;
+                end
+                if max(percList)>= Pc_imb
+                    pressure = 1;
+                else
+                    pressure = 0;
+                end
+                end
+            end
+            if Pc_imb < 0 % forced imbibition
+                %% Updating Pc collapse of the layers
+                for ii = 1:obj.numberOfNodes
+
+                        if any(obj.Nodes{ii}.oilLayerExist) && any(obj.Nodes{ii}.ThresholdPressure_LayerCollapse(1,:))... 
+                                && (any(NodeL(ii) == cluster_A_nums(:)) || any(NodeL(ii) == cluster_B_nums(:)) )
+
+                            % Updating Pc of layer collapse
+                            % Cheking layer collapse
+                            for jj = 1:4
+                                if ~isnan(obj.Nodes{ii}.ThresholdPressure_LayerCollapse(1,j)) && ...
+                                        obj.Nodes{ii}.ThresholdPressure_LayerCollapse(1,j) > Pc_imb
+
+                                    obj.Nodes{ii}.oilLayerExist(1,j) = nan;
+ 
+                                    numOfNodes_LayerCollapse = numOfNodes_LayerCollapse + 1; 
+                                end
+                            end
+                        end
+                end
+                for ii = 1:obj.numberOfLinks
+
+                        if any(obj.Links{ii}.oilLayerExist) && any(obj.Links{ii}.ThresholdPressure_LayerCollapse(1,:))...
+                                && (any(LinkL(ii) == cluster_A_nums(:))|| any(LinkL(ii) == cluster_B_nums(:)) )
+
+                            % Updating Pc of layer collapse        
+                            % Cheking layer collapse
+                            for jj = 1:4
+
+                                if ~isnan(obj.Links{ii}.ThresholdPressure_LayerCollapse(1,j)) && ...
+                                        obj.Links{ii}.ThresholdPressure_LayerCollapse(1,j) > Pc_imb
+
+                                    obj.Links{ii}.oilLayerExist(1,j) = nan; 
+                                    numOfLinks_LayerCollapse = numOfLinks_LayerCollapse + 1;
+                                end
+                            end
+                        end
+                end
+            end
+            
+            if inv
+                
+            invaded = numOfLinks_SnapOff + numOfLinks_PistoneLike + ...
+                numOfNodes_SnapOff + numOfNodes_PoreBodyFilling + numOfNodes_LayerCollapse; 
+                    
+                t = t+1; 
+                Pc_imb = Pc_min;
                 %% Updating saturations and conductances 
-                Sw_imb = calculateConductance_and_Saturation(obj, Pc_imb, 'Imbibition');    
+                Sw_imb = calculateConductance_and_Saturation_Imb(obj, Pc_imb,NodeL, NodeL_W, LinkL, LinkL_W, cluster_A_nums, cluster_A, cluster_B_nums, cluster_B);    
                 pressureDistribution_TwoPhases(obj, inletPressure, outletPressure); 
                 
                 PVInjected = poreVolumeInjected + PVInjected ; 
+                poreVolumeInjected = 0;
                 [Krw_imb, Kro_imb] =...
                     calculateRelativePermeability_Imb(obj, outletPressure, LinkL, LinkL_W, cluster_A_nums, cluster_A);
                 obj.ImbibitionData(t,:) = ...
                     [Sw_imb,Pc_imb,Krw_imb, Kro_imb,invaded, ...
                     numOfLinks_SnapOff,numOfLinks_PistoneLike, ...
                     numOfLinks_LayerCollapse,numOfNodes_SnapOff, ...
-                    numOfNodes_PoreBodyFilling,numOfNodes_LayerCollapse];
+                    numOfNodes_PoreBodyFilling,numOfNodes_LayerCollapse,Pc_min];  
                 
-                Pc_imb = Pc_imb - Pc_interval;                         
-                [~, ~, ~,cluster_A_nums,cluster_B_nums] = Clustering(obj); 
+                [~, NodeL, LinkL,cluster_A_nums,cluster_B_nums] = Clustering(obj);             
+                [~, NodeL_W, LinkL_W,cluster_A,cluster_B] = Clustering_water(obj);
             end
-             
+            inv = false;
+            if press ~= 0
+                Pc_imb = Pc_imb - Pc_interval;
+            end 
+                
+            end
+             obj.sequence(1:obj.numberOfLinks,1:9) = invaded_Element(1:obj.numberOfLinks,1:9);
+            
              %% Ploting Pc & Kr
             S = obj.DrainageData(:,1);
             P = obj.DrainageData(:,2);
@@ -1664,14 +1787,48 @@ classdef Network < handle & Fluids
             legend('Water Relative Permeability','Oil Relative Permeability','Location','North')
 
 
-        end   
+        end  
+                
         %% vtk file generation
         function vtkOutput(obj)
+            A = zeros(obj.numberOfLinks,2);
+            B = zeros(obj.numberOfLinks,1);
+            C = zeros(obj.numberOfNodes,3);
+            RP = zeros(obj.numberOfNodes,1);
+            RT = zeros(obj.numberOfLinks,1);
+            
+            for i = 1:obj.numberOfNodes
+                C(i,1:3) = [obj.Nodes{i}.x_coordinate, obj.Nodes{i}.y_coordinate, obj.Nodes{i}.z_coordinate];
+                B(i,1) = [obj.Nodes{i}.index];
+                RP(i,1) = [obj.Nodes{i}.radius];
+            end
+            for i = 1:obj.numberOfLinks
+                A(i,1:2) = [obj.Links{i}.pore1Index, obj.Links{i}.pore2Index];
+                B(i,1) = [obj.Links{i}.index];
+                RT(i,1) = [obj.Links{i}.radius];
+            end
+            
             vtkFileID = fopen('output.vtk','w');
             if vtkFileID == -1
                 error('Cannot open file for writing.');
             end
             title = 'output';
+            fprintf ( vtkFileID, '# vtk DataFile Version 2.0\n' );
+            fprintf ( vtkFileID, '%s\n', title );
+            fprintf ( vtkFileID, 'ASCII\n' );
+            fprintf ( vtkFileID, '\n' );
+            fprintf ( vtkFileID, 'DATASET POLYDATA \n' );
+            fprintf ( vtkFileID, 'POINTS %d double\n', obj.numberOfNodes ); 
+            fprintf( vtkFileID,'%f %f %f\n',C); 
+            
+        end
+        %% vtk file generation
+        function vtkOutput_old(obj)
+            vtkFileID = fopen('output_old.vtk','w');
+            if vtkFileID == -1
+                error('Cannot open file for writing.');
+            end
+            title = 'output_old';
             fprintf ( vtkFileID, '# vtk DataFile Version 2.0\n' );
             fprintf ( vtkFileID, '%s\n', title );
             fprintf ( vtkFileID, 'ASCII\n' );
@@ -1683,6 +1840,45 @@ classdef Network < handle & Fluids
             end
             
         end
+        function vtpOutput(obj)
+            A = zeros(obj.numberOfLinks,2);
+            B = zeros(obj.numberOfLinks,1);
+            C = zeros(obj.numberOfNodes,3);
+            RP = zeros(obj.numberOfNodes,1);
+            RT = zeros(obj.numberOfLinks,1);
+            
+            for i = 1:obj.numberOfNodes
+                C(i,1:3) = [obj.Nodes{i}.x_coordinate, obj.Nodes{i}.y_coordinate, obj.Nodes{i}.z_coordinate];
+                B(i,1) = [obj.Nodes{i}.index];
+                RP(i,1) = [obj.Nodes{i}.radius];
+            end
+            for i = 1:obj.numberOfLinks
+                A(i,1:2) = [obj.Links{i}.pore1Index, obj.Links{i}.pore2Index];
+                B(i,1) = [obj.Links{i}.index];
+                RT(i,1) = [obj.Links{i}.radius];
+            end
+            
+            vtkFileID = fopen('Out.vtk','w');
+            if vtkFileID == -1
+                error('Cannot open file for writing.');
+            end 
+            fprintf( vtpFileID, '<VTKFile byte_order="LittleEndian" type="PolyData" version="1.0">\n' );
+            fprintf( vtpFileID, '  <PolyData>\n' );
+            fprintf( vtpFileID, '    <Piece NumberOfLines="1421" NumberOfPoints="1000">\n');
+            fprintf( vtpFileID, '      <Points>\n');
+            fprintf( vtpFileID, '        <DataArray Name ="coords" NumberOfComponents="3" type="Float64">');   
+            fprintf( vtpFileID,'%f\t %f\t %f\t',C);
+            fprintf( vtpFileID, '</DataArray>\n </Points>\n <Lines>\n <DataArray Name="connectivity" NumberOfComponents="1" type="Int32">');
+            fprintf( vtpFileID,'%d\t %d\t', A);
+            fprintf( vtpFileID, '</DataArray>\n <DataArray Name="offsets" NumberOfComponents="1" type="Int32">');
+            fprintf( vtpFileID,'%d\t',B);
+            fprintf( vtpFileID, '</DataArray>\n<PointData>\n<DataArray Name="pore.Radius" NumberOfComponents="1" type="Int32">');
+            fprintf( vtpFileID,'%d\t',RP);
+            fprintf( vtpFileID, '</DataArray>\n </PointData>\n <CellData>\n <DataArray Name="link.Radius" NumberOfComponents="1" type="Int32">');
+            fprintf( vtpFileID,'%d\t',RT);
+            fprintf ( vtpFileID, '</DataArray>\n </CellData>\n </Piece>\n </PolyData>\n</VTKFile');           
+        end
+        
     end
 end
 
