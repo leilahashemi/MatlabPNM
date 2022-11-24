@@ -6,8 +6,8 @@ classdef Node < Element
         z_coordinate
         connectionNumber
         connectedNodes
-        connectedLinks
-        ThresholdPressure_PoreBodyFilling = nan;
+        connectedLinks 
+        imbThresholdPressure_PoreBodyFilling = nan;
     end
     
     methods
@@ -43,61 +43,29 @@ classdef Node < Element
             obj.volume = volume;
             obj.radius = radius;
             obj.shapeFactor = shapeFactor;
-            obj.clayVolume = clayVolume;            
-            
-            % Geometry and conductance specification of the elements is
-            % based of : Patzek, T. W., & Silin, D. B. (2001). Shape factor and hydraulic conductance in noncircular capillaries: I. One-phase creeping flow. Journal of Colloid and Interface Science. https://doi.org/10.1006/jcis.2000.7413
-            % For ducts with square cross-sections, all four half-angles are equal to /4? and G = 1/16 . Circular ducts have no corners and G =1/ 4? . For simplicity, all ducts with shape factors between those of equilateral triangle and square can be mapped onto squares, and those with shape factors above 1/16 onto circles.
-            % we'd better to insert star shapes later
-            if obj.shapeFactor > 0 && obj.shapeFactor <= sqrt(3) / 36
-                obj.geometry = 'Triangle';
-                betha2_min         = atan((2 / sqrt(3)) * cos((acos(-12 * sqrt(3) * obj.shapeFactor)) / 3 + (4 * pi / 3)));
-                betha2_max         = atan((2 / sqrt(3)) * cos((acos(-12 * sqrt(3) * obj.shapeFactor)) / 3 ));
-                obj.halfAngle2     = betha2_min + rand * (betha2_max - betha2_min);
-                obj.halfAngle1 = -0.5 * obj.halfAngle2 + 0.5 * asin((tan(obj.halfAngle2) + 4 * obj.shapeFactor) * sin(obj.halfAngle2) / (tan(obj.halfAngle2) - 4 * obj.shapeFactor));
-                obj.halfAngle3 = pi / 2 - obj.halfAngle1 - obj.halfAngle2;
-                obj.halfAngle4 = nan;
-                obj.area = obj.radius^2/4/obj.shapeFactor;                
-                obj.conductance = 3 * obj.area^2 * obj.shapeFactor /obj.waterViscosity / 5;
-            elseif obj.shapeFactor > sqrt(3) / 36 && obj.shapeFactor <= 1 / 16
-                obj.geometry = 'Square';
-                obj.halfAngle1 = pi / 4;
-                obj.halfAngle2 = pi / 4;
-                obj.halfAngle3 = pi / 4;
-                obj.halfAngle4 = pi / 4;
-                obj.area = 4*obj.radius^2;                
-                obj.conductance = 0.5623 * obj.area^2 * obj.shapeFactor /obj.waterViscosity;
-            elseif obj.shapeFactor > 1 / 16
-                obj.geometry = 'Circle';
-                obj.halfAngle1 = nan;
-                obj.halfAngle2 = nan;
-                obj.halfAngle3 = nan;
-                obj.halfAngle4 = nan;
-                obj.area = pi*obj.radius^2;                
-                obj.conductance = 0.5 * obj.area^2 * obj.shapeFactor /obj.waterViscosity;
-            end   
-        end
-        %% PoreBodyFilling 
+            obj.clayVolume = clayVolume;   
+        end   
+         %% PoreBodyFilling 
         %Patzek
-        function [ThresholdPressure_PoreBodyFilling, oilLayerExist] = calculateThresholdPressurePoreBodyFilling_Patzek (obj,network) 
+        function calculateThresholdPressurePoreBodyFilling_P (obj,network) 
          % Based on Patzek: eqs 42-49
-         oilLayerExist = nan;
+         obj.oilLayerExist(1,:) = nan;
          W = [0;0.72;0.45;1.2;1.5;5];
          attachedThroats = obj.connectedLinks;
-         oilFilledAttachedThroats = zeros(obj.connectionNumber,1);
+         
+         z = 0;% number of oil filled attached throats
          for i = 1:obj.connectionNumber
-             if network.Links{attachedThroats(i)}.occupancy == 'B' || network.Links{attachedThroats(i)}.isInvaded
-                 oilFilledAttachedThroats(i,1) = attachedThroats(i);
+             if network.Links{attachedThroats(i)}.occupancy == 'B' 
+                 z=z+1; 
              end
-         end
-         oilFilledAttachedThroats = nonzeros(oilFilledAttachedThroats);
-         z = length(oilFilledAttachedThroats); % number of oil filled attached throats 
+         end    
+         
          if z == 0
-             ThresholdPressure_PoreBodyFilling = nan;
+             obj.imbThresholdPressure_PoreBodyFilling = nan;
          elseif z == 1
-             [ThresholdPressure_PoreBodyFilling,oilLayerExist] =...
-                 calculateThresholdPressurePistonLike_Imbibition(obj, network.Pc_drain_max);
-         else
+%              obj.calculateThresholdPressurePistonLike_Imbibition(network.Pc_drain_max);
+            obj.imbThresholdPressure_PoreBodyFilling = obj.imbThresholdPressure_PistonLike;
+         else            
             if z > 5
                 w = W(6);
             else
@@ -113,31 +81,29 @@ classdef Node < Element
                  denominator = denominator + randNumber;
              end
              R_ave = (obj.radius + w * nominator / denominator)/cos(obj.advancingContactAngle);
-             ThresholdPressure_PoreBodyFilling = 2*obj.sig_ow/R_ave; 
+             obj.imbThresholdPressure_PoreBodyFilling = 2*obj.sig_ow/R_ave; 
          end        
         end
         %Blunt1
-        function [ThresholdPressure_PoreBodyFilling, oilLayerExist] = calculateThresholdPressurePoreBodyFilling_Blunt1 (obj,network)
+        function calculateThresholdPressurePoreBodyFilling_Blunt1 (obj,network)
          % Based on Blunt1
-         oilLayerExist = nan;
+         obj.oilLayerExist(1,:) = nan;
          W = [0;2.5;5;20;100];
          attachedThroats = obj.connectedLinks;
-         oilFilledAttachedThroats = zeros(obj.connectionNumber,1);
-         a = 0;
+         
+         z = 0;% number of oil filled attached throats
          for i = 1:obj.connectionNumber
-             if network.Links{attachedThroats(i)}.occupancy == 'B' || network.Links{attachedThroats(i)}.isInvaded
-                 a = a+1;
-                 oilFilledAttachedThroats(a,1) = attachedThroats(i);
+             if network.Links{attachedThroats(i)}.occupancy == 'B' 
+                 z=z+1; 
              end
-         end
-         oilFilledAttachedThroats = nonzeros(oilFilledAttachedThroats);
-         z = length(oilFilledAttachedThroats); % number of oil filled attached throats   
+         end    
+         
          if z == 0
-             ThresholdPressure_PoreBodyFilling = nan;
+             obj.imbThresholdPressure_PoreBodyFilling = nan;
          elseif z == 1
-             [ThresholdPressure_PoreBodyFilling,oilLayerExist] =...
-                 calculateThresholdPressurePistonLike_Imbibition(obj, network.Pc_drain_max);
-         else
+%              obj.calculateThresholdPressurePistonLike_Imbibition(network.Pc_drain_max);
+            obj.imbThresholdPressure_PoreBodyFilling = obj.imbThresholdPressure_PistonLike;
+         else            
              if z > 5
                  w = W(5);
              else
@@ -150,91 +116,86 @@ classdef Node < Element
                  randNumber = rand;
                  nominator = nominator + randNumber * w;
              end
-             ThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/(obj.radius + nominator); 
+             obj.imbThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/(obj.radius + nominator); 
          end        
         end
         %Blunt2
-        function [ThresholdPressure_PoreBodyFilling, oilLayerExist] = calculateThresholdPressurePoreBodyFilling_Blunt2 (obj,network)
+        function calculateThresholdPressurePoreBodyFilling (obj,network)
          % Based on Blunt2
-         oilLayerExist = nan;
+         obj.oilLayerExist(1,:) = nan;
          W =15000;
          attachedThroats = obj.connectedLinks;
-         oilFilledAttachedThroats = zeros(obj.connectionNumber,1);
-         a = 0;
+         
+         z = 0;% number of oil filled attached throats
          for i = 1:obj.connectionNumber
-             if network.Links{attachedThroats(i)}.occupancy == 'B' || network.Links{attachedThroats(i)}.isInvaded
-                 a = a+1;
-                 oilFilledAttachedThroats(a,1) = attachedThroats(i);
+             if network.Links{attachedThroats(i)}.occupancy == 'B' 
+                 z=z+1; 
              end
-         end
-         oilFilledAttachedThroats = nonzeros(oilFilledAttachedThroats);
-         z = length(oilFilledAttachedThroats); % number of oil filled attached throats 
+         end    
+         
          if z == 0
-             ThresholdPressure_PoreBodyFilling = nan;
+             obj.imbThresholdPressure_PoreBodyFilling = nan;
          elseif z == 1
-             [ThresholdPressure_PoreBodyFilling,oilLayerExist] =...
-                 calculateThresholdPressurePistonLike_Imbibition(obj, network.Pc_drain_max);
-         else            
+%              obj.calculateThresholdPressurePistonLike_Imbibition(network.Pc_drain_max);
+            obj.imbThresholdPressure_PoreBodyFilling = obj.imbThresholdPressure_PistonLike;
+         else             
             nominator = 0;
              for ii = 1:z
                  randNumber = rand;
                  nominator = nominator + randNumber * W;
              end
-             ThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/obj.radius - obj.sig_ow *nominator; 
+             obj.imbThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/obj.radius - obj.sig_ow *nominator; 
         end
         
         end
         %Valvatne
-        function [ThresholdPressure_PoreBodyFilling, oilLayerExist] = calculateThresholdPressurePoreBodyFilling(obj,network)
-         % Based on Valvatne
-         oilLayerExist = nan;
+        function calculateThresholdPressurePoreBodyFilling_V(obj,network)
+         % Based on Valvatne 
+         obj.oilLayerExist(1,:) = nan;
          W = 0.03/sqrt(network.absolutePermeability/1.01325E+15);
-         attachedThroats = obj.connectedLinks;
-         oilFilledAttachedThroats = zeros(obj.connectionNumber,1);
+         attachedThroats = obj.connectedLinks; 
+         
+         z = 0;% number of oil filled attached throats
          for i = 1:obj.connectionNumber
-             if network.Links{attachedThroats(i)}.occupancy == 'B' || network.Links{attachedThroats(i)}.isInvaded
-                 oilFilledAttachedThroats(i,1) = attachedThroats(i);
+             if network.Links{attachedThroats(i)}.occupancy == 'B' 
+                 z=z+1; 
              end
-         end
-         oilFilledAttachedThroats = nonzeros(oilFilledAttachedThroats);
-         z = length(oilFilledAttachedThroats); % number of oil filled attached throats 
+         end    
+         
          if z == 0
-             ThresholdPressure_PoreBodyFilling = nan;
+             obj.imbThresholdPressure_PoreBodyFilling = nan;
          elseif z == 1
-             [ThresholdPressure_PoreBodyFilling,oilLayerExist] =...
-                 calculateThresholdPressurePistonLike_Imbibition(obj, network.Pc_drain_max);
+%              obj.calculateThresholdPressurePistonLike_Imbibition(network.Pc_drain_max);
+            obj.imbThresholdPressure_PoreBodyFilling = obj.imbThresholdPressure_PistonLike;
          else            
             nominator = 0;
              for ii = 1:z
                  randNumber = rand;
                  nominator = nominator + randNumber * W;
              end
-             ThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/obj.radius - obj.sig_ow *nominator; 
-        end
-        
+             obj.imbThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/obj.radius - obj.sig_ow *nominator; 
+         end 
         end
         %Oren1
-        function [ThresholdPressure_PoreBodyFilling, oilLayerExist] = calculateThresholdPressurePoreBodyFilling_Oren1 (obj,network)
+        function calculateThresholdPressurePoreBodyFilling_Oren1 (obj,network)
          % Based on Oren1
-         oilLayerExist = nan;
+         obj.oilLayerExist(1,:) = nan;
          W = [0;0.5;1;2;5;10];
          attachedThroats = obj.connectedLinks;
-         oilFilledAttachedThroats = zeros(obj.connectionNumber,1);
-         a = 0;
+         
+         z = 0;% number of oil filled attached throats
          for i = 1:obj.connectionNumber
-             if network.Links{attachedThroats(i)}.occupancy == 'B' || network.Links{attachedThroats(i)}.isInvaded
-                 a = a+1;
-                 oilFilledAttachedThroats(a,1) = attachedThroats(i);
+             if network.Links{attachedThroats(i)}.occupancy == 'B' 
+                 z=z+1; 
              end
-         end
-         oilFilledAttachedThroats = nonzeros(oilFilledAttachedThroats);
-         z = length(oilFilledAttachedThroats); % number of oil filled attached throats  
+         end    
+         
          if z == 0
-             ThresholdPressure_PoreBodyFilling = nan;
+             obj.imbThresholdPressure_PoreBodyFilling = nan;
          elseif z == 1
-             [ThresholdPressure_PoreBodyFilling,oilLayerExist] =...
-                 calculateThresholdPressurePistonLike_Imbibition(obj, network.Pc_drain_max);
-         else            
+%              obj.calculateThresholdPressurePistonLike_Imbibition(network.Pc_drain_max);
+            obj.imbThresholdPressure_PoreBodyFilling = obj.imbThresholdPressure_PistonLike;
+         else                        
             nominator = 0;
              for ii = 1:z
                  if z > 5
@@ -245,31 +206,29 @@ classdef Node < Element
                  randNumber = rand;
                  nominator = nominator + randNumber * w * network.Links{oilFilledAttachedThroats(ii,1)}.radius;
              end
-             ThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/(obj.radius + nominator); 
+             obj.imbThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/(obj.radius + nominator); 
          end        
         end
         %Oren2
-        function [ThresholdPressure_PoreBodyFilling, oilLayerExist] = calculateThresholdPressurePoreBodyFilling_Oren2 (obj,network) 
+        function calculateThresholdPressurePoreBodyFilling_O2 (obj,network) 
          % Based on Oren2
-         oilLayerExist = nan;
+         obj.oilLayerExist(1,:) = nan;
          W = [0;0.5;1;2;5;10];
          attachedThroats = obj.connectedLinks;
-         oilFilledAttachedThroats = zeros(obj.connectionNumber,1);
-         a = 0;
+         
+         z = 0;% number of oil filled attached throats
          for i = 1:obj.connectionNumber
-             if network.Links{attachedThroats(i)}.occupancy == 'B' || network.Links{attachedThroats(i)}.isInvaded
-                 a = a+1;
-                 oilFilledAttachedThroats(a,1) = attachedThroats(i);
+             if network.Links{attachedThroats(i)}.occupancy == 'B' 
+                 z=z+1; 
              end
-         end
-         oilFilledAttachedThroats = nonzeros(oilFilledAttachedThroats);
-         z = length(oilFilledAttachedThroats); % number of oil filled attached throats
+         end    
+         
          if z == 0
-             ThresholdPressure_PoreBodyFilling = nan;
+             obj.imbThresholdPressure_PoreBodyFilling = nan;
          elseif z == 1
-             [ThresholdPressure_PoreBodyFilling,oilLayerExist] =...
-                 calculateThresholdPressurePistonLike_Imbibition(obj, network.Pc_drain_max);
-         else            
+%              obj.calculateThresholdPressurePistonLike_Imbibition(network.Pc_drain_max);
+            obj.imbThresholdPressure_PoreBodyFilling = obj.imbThresholdPressure_PistonLike;
+         else                        
             nominator = 0;
              for ii = 1:z
                  if z > 5
@@ -280,42 +239,39 @@ classdef Node < Element
                  randNumber = rand;
                  nominator = nominator + randNumber * w * network.Links{oilFilledAttachedThroats(ii,1)}.radius;
              end
-             ThresholdPressure_PoreBodyFilling = (1 + 2 * sqrt(pi * obj.shapeFactor))*obj.sig_ow * cos(obj.advancingContactAngle)/...
+             obj.imbThresholdPressure_PoreBodyFilling = (1 + 2 * sqrt(pi * obj.shapeFactor))*obj.sig_ow * cos(obj.advancingContactAngle)/...
                  (obj.radius + nominator); 
          end        
         end
         %Piri
-        function [ThresholdPressure_PoreBodyFilling, oilLayerExist] = calculateThresholdPressurePoreBodyFilling_Piri (obj,network)
+        function calculateThresholdPressurePoreBodyFilling_Piri (obj,network)
          % Based on Piri
-         oilLayerExist = nan;
+         obj.oilLayerExist(1,:) = nan;
          W =0.03 * 10^(-6);
          attachedThroats = obj.connectedLinks;
-         oilFilledAttachedThroats = zeros(obj.connectionNumber,1);
-         a = 0;
+         
+         z = 0;% number of oil filled attached throats
          for i = 1:obj.connectionNumber
-             if network.Links{attachedThroats(i)}.occupancy == 'B' || network.Links{attachedThroats(i)}.isInvaded
-                 a = a+1;
-                 oilFilledAttachedThroats(a,1) = attachedThroats(i);
+             if network.Links{attachedThroats(i)}.occupancy == 'B' 
+                 z=z+1; 
              end
-         end
-         oilFilledAttachedThroats = nonzeros(oilFilledAttachedThroats);
-         z = length(oilFilledAttachedThroats); % number of oil filled attached throats 
+         end    
+         
          if z == 0
-             ThresholdPressure_PoreBodyFilling = nan;
+             obj.imbThresholdPressure_PoreBodyFilling = nan;
          elseif z == 1
-             [ThresholdPressure_PoreBodyFilling,oilLayerExist] =...
-                 calculateThresholdPressurePistonLike_Imbibition(obj, network.Pc_drain_max);
-         else            
+%              obj.calculateThresholdPressurePistonLike_Imbibition(network.Pc_drain_max);
+            obj.imbThresholdPressure_PoreBodyFilling = obj.imbThresholdPressure_PistonLike;
+         else                        
             nominator = 0;
              for ii = 1:z
                  randNumber = rand;
                  nominator = nominator + randNumber * W;
              end
-             ThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/obj.radius - obj.sig_ow *nominator; 
+             obj.imbThresholdPressure_PoreBodyFilling = 2*obj.sig_ow * cos(obj.advancingContactAngle)/obj.radius - obj.sig_ow *nominator; 
         end
         
         end
-        
     end
 end
 
