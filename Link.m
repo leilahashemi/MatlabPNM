@@ -1,8 +1,5 @@
 classdef Link < Element
     
-    %LINK is a class for link objects
-    %   Detailed explanation goes here
-    
     properties
         pore1Index
         pore2Index
@@ -10,12 +7,6 @@ classdef Link < Element
         pore1Length
         pore2Length
         linkLength  % only the length of the link
-        cylindricalConductance
-        nodeLinkSystemConductance_W
-        nodeLinkSystemConductance_O
-        adsorbedConcentration = 0;
-        adsorbedConcentration_SolidFluid = 0;
-        adsorbedConcentration_FluidFluid = 0;
     end
     
     methods
@@ -53,7 +44,6 @@ classdef Link < Element
             obj.linkLength = linkLength;
             obj.volume = volume;
             obj.clayVolume = clayVolume;
-            water_viscosity = 0.001; 
             
             %Cheking inlet or outlet status of the link
             obj.isInlet  = false;
@@ -70,30 +60,39 @@ classdef Link < Element
             % we'd better to insert star shapes later
             if obj.shapeFactor > 0 && obj.shapeFactor <= sqrt(3) / 36
                 obj.geometry = 'Triangle';
-                betha2_min         = atan((2 / sqrt(3)) * cos((acos(-12 * sqrt(3) * obj.shapeFactor)) / 3 + (4 * pi / 3)));
-                betha2_max         = atan((2 / sqrt(3)) * cos((acos(-12 * sqrt(3) * obj.shapeFactor)) / 3 ));
-                obj.halfAngle2     = betha2_min + rand * (betha2_max - betha2_min);
+                betha2_min = atan((2 / sqrt(3)) * cos((acos(-12 * sqrt(3) * obj.shapeFactor)) / 3 + (4 * pi / 3)));
+                betha2_max = atan((2 / sqrt(3)) * cos((acos(-12 * sqrt(3) * obj.shapeFactor)) / 3 ));
+                obj.halfAngle2 = betha2_min + rand * (betha2_max - betha2_min);
                 obj.halfAngle1 = -0.5 * obj.halfAngle2 + 0.5 * asin((tan(obj.halfAngle2) + 4 * obj.shapeFactor) * sin(obj.halfAngle2) / (tan(obj.halfAngle2) - 4 * obj.shapeFactor));
                 obj.halfAngle3 = pi / 2 - obj.halfAngle1 - obj.halfAngle2;
                 obj.halfAngle4 = nan;
-                obj.area = obj.radius^2/4/obj.shapeFactor;            
-                obj.conductance = 3 * obj.area^2 * obj.shapeFactor /water_viscosity / 5;
+                obj.area = obj.radius^2/4/obj.shapeFactor;              
+                obj.conductance = 3 * obj.area^2 * obj.shapeFactor /obj.waterViscosity / 5;
+                if obj.volume == 0
+                    obj.volume = obj.area * obj.length;
+                end
             elseif obj.shapeFactor > sqrt(3) / 36 && obj.shapeFactor <= 1 / 16
                 obj.geometry = 'Square';
                 obj.halfAngle1 = pi / 4;
                 obj.halfAngle2 = pi / 4;
                 obj.halfAngle3 = pi / 4;
                 obj.halfAngle4 = pi / 4;
-                obj.area = 4*obj.radius^2;                         
-                obj.conductance = 0.5623 * obj.area^2 * obj.shapeFactor /water_viscosity;
+                obj.area = 4*obj.radius^2;                          
+                obj.conductance = 0.5623 * obj.area^2 * obj.shapeFactor /obj.waterViscosity;
+                if obj.volume == 0
+                    obj.volume = obj.area * obj.length;
+                end
             elseif obj.shapeFactor > 1 / 16
                 obj.geometry = 'Circle';
                 obj.halfAngle1 = nan;
                 obj.halfAngle2 = nan;
                 obj.halfAngle3 = nan;
                 obj.halfAngle4 = nan;
-                obj.area = pi*obj.radius^2;        
-                obj.conductance = 0.5 * obj.area^2 * obj.shapeFactor /water_viscosity;
+                obj.area = pi*obj.radius^2;                
+                obj.conductance = 0.5 * obj.area^2 * obj.shapeFactor /obj.waterViscosity;
+                if obj.volume == 0
+                    obj.volume = obj.area * obj.length;
+                end
             end 
         end        
     end
