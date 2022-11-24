@@ -12,30 +12,18 @@ network.calculateNetworkProperties(inletPressure, outletPressure);
 % visualized(network) 
 toc
 
-% tic
-% soluteConcentration = 1;
-% poreVolumeInjected = network.poreVolume/15; 
-% fprintf('=============================== Diffusion Start =====================================\n'); 
-% network.calculateReactiveTransport_SinglePhaseDiffusion(inletPressure, outletPressure, soluteConcentration, poreVolumeInjected);
+tic
+soluteConcentration = 1;
+poreVolumeInjected = network.poreVolume/50; 
+simulationVolume = network.poreVolume/10;
+fprintf('=============================== Diffusion Start =====================================\n'); 
+network.calculateReactiveTransport_SinglePhaseDiffusion(inletPressure, outletPressure, soluteConcentration, simulationVolume, poreVolumeInjected);
+% Raoof
+fprintf('=============================== Diffusion Start =====================================\n'); 
+network.calculateReactiveTransport_SinglePhaseDiffusion_R(inletPressure, outletPressure, soluteConcentration, poreVolumeInjected);
 % fprintf('=============================== Desorption Start =====================================\n'); 
 % network.calculateReactiveTransport_SinglePhaseDesorption(inletPressure, outletPressure, soluteConcentration, poreVolumeInjected);
-% toc
+toc
 
-% Visualization 
-% fileName = network.vtkWriter('init',0);
+% Visualization  
 fileName = network.vtkWriter_glyph('init',0);
- 
-% tic
-fprintf('=============================== Drainage Start =====================================\n'); 
-network.PrimaryDrainage(inletPressure, outletPressure);
-% % Plot Pc & Kr 
-% PLOTDRAIN(network);
-% toc
-%  
-% tic
-fprintf('=============================== Imbibition Start =====================================\n');  
-% network.contactAngleDistribution();
-network.ScoendaryImbibition(inletPressure, outletPressure); 
-% % Plot Pc & Kr 
-% PLOTDRAIN_IMB(network);
-% toc
