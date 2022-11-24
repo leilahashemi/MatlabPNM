@@ -793,7 +793,7 @@ classdef Network < handle & Fluids
                 
             obj.BreakThroughCurve_singlePhase(t,1) = timePlot(t);
             obj.BreakThroughCurve_singlePhase(t,2) = flux_averagedConcentration(t);
-%             obj.vtkWriter_glyph('Diff',t); 
+            obj.vtkWriter_glyph('Diff',t); 
             end
              
 %             obj.BreakThroughCurve_singlePhase(:,1) = timePlot;
